@@ -27,11 +27,17 @@ object PlaybackQueueStore {
 
     val state = _state.asStateFlow()
 
+    private val _playRequest = MutableStateFlow<PlaybackStartRequest?>(null)
+    val playRequest = _playRequest.asStateFlow()
+    private var playRequestSequence = 0L
+
     fun initialize(context: Context) {
         if (initialized) return
 
         synchronized(lock) {
             if (initialized) return
+
+            _playRequest.value = null
 
             preferences = context.applicationContext
                 .getSharedPreferences(
@@ -73,8 +79,22 @@ object PlaybackQueueStore {
         )
     }
 
+    fun replaceAndRequestPlay(
+        tracks: List<Track>,
+        currentTrackId: String? = null
+    ): PlaybackQueueState = synchronized(lock) {
+        ensureInitialized()
+        val entries = tracks.map(::entryFromTrack)
+        val currentEntryId = currentTrackId?.let { id ->
+            entries.firstOrNull { it.trackId == id }?.entryId
+        } ?: entries.firstOrNull()?.entryId
+        val next = PlaybackQueuePolicy.replace(entries, currentEntryId)
+        requestPlay(next.current?.entryId)
+        commit(next)
+    }
+
     fun playNow(track: Track): PlaybackQueueState =
-        replace(
+        replaceAndRequestPlay(
             tracks = listOf(track),
             currentTrackId = track.id
         )
@@ -128,6 +148,33 @@ object PlaybackQueueStore {
             )
         }
 
+    fun selectAndRequestPlay(entryId: String): PlaybackQueueState = synchronized(lock) {
+        ensureInitialized()
+        val next = PlaybackQueuePolicy.select(_state.value, entryId)
+        if (next.current?.entryId == entryId) requestPlay(entryId)
+        commit(next)
+    }
+
+    fun consumePlayRequest(entryId: String) = synchronized(lock) {
+        ensureInitialized()
+        if (_playRequest.value?.entryId == entryId) {
+            _playRequest.value = null
+        }
+    }
+
+    private fun requestPlay(entryId: String?) {
+        if (entryId.isNullOrBlank()) {
+            _playRequest.value = null
+            return
+        }
+        playRequestSequence += 1L
+        _playRequest.value = PlaybackStartRequest(
+            entryId = entryId,
+            requestedAtMs = System.currentTimeMillis(),
+            requestId = playRequestSequence
+        )
+    }
+
     fun move(
         fromIndex: Int,
         toIndex: Int
@@ -155,6 +202,7 @@ object PlaybackQueueStore {
 
     fun clear(): PlaybackQueueState = synchronized(lock) {
         ensureInitialized()
+        _playRequest.value = null
         commit(PlaybackQueueState())
     }
 
