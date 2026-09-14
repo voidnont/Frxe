@@ -32,6 +32,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 @OptIn(UnstableApi::class)
@@ -252,8 +253,13 @@ class FrxePlaybackService : MediaSessionService() {
         prepareRestorePosition(savedSnapshot)
 
         serviceScope.launch {
-            PlaybackQueueStore.state.collectLatest { state ->
-                syncQueueState(state)
+            combine(
+                PlaybackQueueStore.state,
+                PlaybackQueueStore.playRequest
+            ) { state, request ->
+                state to request
+            }.collectLatest { (state, request) ->
+                syncQueueState(state, request)
             }
         }
 
@@ -356,7 +362,8 @@ class FrxePlaybackService : MediaSessionService() {
     }
 
     private suspend fun syncQueueState(
-        state: PlaybackQueueState
+        state: PlaybackQueueState,
+        playRequest: PlaybackStartRequest?
     ) {
         val currentEntry = state.current
 
@@ -369,16 +376,29 @@ class FrxePlaybackService : MediaSessionService() {
             return
         }
 
+        val explicitPlayRequested =
+            PlaybackStartRequestPolicy.shouldConsume(
+                request = playRequest,
+                currentEntryId = currentEntry.entryId,
+                nowMs = System.currentTimeMillis()
+            )
+
         if (
             currentEntry.entryId == loadedQueueEntryId &&
             player.currentMediaItem != null
         ) {
             initialQueueSyncDone = true
+            if (explicitPlayRequested) {
+                pendingHistoryEntryId = currentEntry.entryId
+                player.play()
+                PlaybackQueueStore.consumePlayRequest(currentEntry.entryId)
+            }
             return
         }
 
         val shouldAutoPlay =
-            pendingAutoPlayEntryId == currentEntry.entryId ||
+            explicitPlayRequested ||
+                pendingAutoPlayEntryId == currentEntry.entryId ||
                 initialQueueSyncDone
 
         initialQueueSyncDone = true
@@ -428,6 +448,9 @@ class FrxePlaybackService : MediaSessionService() {
 
         if (shouldAutoPlay) {
             player.play()
+            if (explicitPlayRequested) {
+                PlaybackQueueStore.consumePlayRequest(expectedEntryId)
+            }
         }
     }
 
