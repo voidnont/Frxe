@@ -22,4 +22,10 @@ data class PlaybackQueueState(
         get() = entries.getOrNull(currentIndex)
 }
 
+data class PlaybackStartRequest(
+    val entryId: String,
+    val requestedAtMs: Long,
+    val requestId: Long
+)
+
 enum class QueueRepeatMode { Off, All, One }
