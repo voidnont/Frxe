@@ -38,20 +38,16 @@ jobs:
       - name: Package clean 0.6.7 source
         shell: bash
         run: |
-          zip -r Frxe-0.6.7-source.zip . \
-            -x '.git/*' \
-               '.github/*' \
-               '.frxe-tools/*' \
-               '.frxe-signing/*' \
-               'build-logs/*' \
-               '*/build/*' \
-               '*.apk' \
-               'local.properties'
+          git ls-files \
+            | grep -Ev '^\.github/' \
+            | grep -Ev '(^|/)local\.properties$' \
+            | grep -Ev '\.apk$' \
+            | zip -q Frxe-0.6.7-source.zip -@
 
       - name: Verify source package exclusions
         shell: bash
         run: |
-          unzip -l Frxe-0.6.7-source.zip > source-files.txt
+          unzip -Z1 Frxe-0.6.7-source.zip > source-files.txt
           if grep -E '(^|/)(\.github|\.git|\.frxe-tools|\.frxe-signing|build-logs|build)/' source-files.txt; then
             echo 'Source package contains an excluded path.' >&2
             exit 1
