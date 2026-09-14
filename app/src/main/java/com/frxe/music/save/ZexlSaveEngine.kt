@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import com.frxe.music.BuildConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -212,7 +213,7 @@ internal class ZexlSaveEngine(
             requestMethod = method
             connectTimeout = 90_000
             readTimeout = 90_000
-            setRequestProperty("User-Agent", "Frxe/0.5.0")
+            setRequestProperty("User-Agent", "Frxe/${BuildConfig.VERSION_NAME}")
             apiKey?.takeIf { it.isNotBlank() }?.let { setRequestProperty("Authorization", "Bearer $it") }
         }
 

@@ -39,6 +39,19 @@ object PlaybackResolutionMonitor {
         )
     }
 
+    fun resolvingFallback(
+        trackId: String,
+        fallbackName: String
+    ) {
+        if (!isCurrent(trackId)) return
+
+        _state.value = PlaybackResolutionStatus(
+            trackId = trackId,
+            stage = PlaybackResolutionStage.Resolving,
+            message = "Local audio resolvers failed. Trying $fallbackName backup…"
+        )
+    }
+
     fun isCurrent(trackId: String): Boolean =
         _state.value.trackId == trackId
 
@@ -55,6 +68,19 @@ object PlaybackResolutionMonitor {
                 "Audio resolved with ${it.label}. Starting player…"
             } ?: "Audio source ready. Starting player…",
             resolver = resolver
+        )
+    }
+
+    fun resolvedFallback(
+        trackId: String,
+        fallbackName: String
+    ) {
+        if (!isCurrent(trackId)) return
+
+        _state.value = PlaybackResolutionStatus(
+            trackId = trackId,
+            stage = PlaybackResolutionStage.Resolved,
+            message = "Audio resolved with $fallbackName backup. Starting player…"
         )
     }
 

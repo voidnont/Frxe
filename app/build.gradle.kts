@@ -136,5 +136,8 @@ dependencies {
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.4")
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+
+    testImplementation("junit:junit:4.13.2")
+
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
 }
