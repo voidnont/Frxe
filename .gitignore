@@ -1,0 +1,14 @@
+.gradle/
+.idea/
+build/
+app/build/
+local.properties
+.frxe-tools/
+.frxe-signing/
+build-logs/
+*.apk
+*.aab
+*.jks
+*.keystore
+*.log
+*.iml
