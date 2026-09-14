@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">Frxe</string>
+    <string name="playback_channel">Frxe playback</string>
+    <string name="download_channel">Frxe downloads</string>
+    <string name="download_notification">Downloading for offline playback</string>
+</resources>
