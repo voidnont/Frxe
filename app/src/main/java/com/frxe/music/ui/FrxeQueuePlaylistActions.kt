@@ -30,7 +30,7 @@ fun FrxeViewModel.playQueued(
         listOf(track)
     }
 
-    PlaybackQueueStore.replace(
+    PlaybackQueueStore.replaceAndRequestPlay(
         tracks = actualQueue,
         currentTrackId = track.id
     )
@@ -51,7 +51,7 @@ fun FrxeViewModel.addToQueue(
 fun FrxeViewModel.selectQueueEntry(
     entryId: String
 ) {
-    PlaybackQueueStore.select(entryId)
+    PlaybackQueueStore.selectAndRequestPlay(entryId)
 }
 
 fun FrxeViewModel.removeQueueEntry(
