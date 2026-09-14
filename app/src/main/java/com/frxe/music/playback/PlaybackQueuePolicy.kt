@@ -200,3 +200,19 @@ object PlaybackQueuePolicy {
         }
     }
 }
+
+object PlaybackStartRequestPolicy {
+    const val MAX_AGE_MS = 30_000L
+
+    fun shouldConsume(
+        request: PlaybackStartRequest?,
+        currentEntryId: String?,
+        nowMs: Long,
+        maxAgeMs: Long = MAX_AGE_MS
+    ): Boolean {
+        if (request == null || currentEntryId.isNullOrBlank()) return false
+        if (request.entryId != currentEntryId) return false
+        val age = nowMs - request.requestedAtMs
+        return age in 0..maxAgeMs
+    }
+}
