@@ -4,6 +4,7 @@ import com.frxe.music.model.Track
 import com.frxe.music.playback.AudioOnlyPlaybackPolicy
 import com.frxe.music.playback.PlaybackPrefetchCache
 import com.frxe.music.playback.ResolvedStreamRequestHeaders
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -59,36 +60,35 @@ class PlaybackStreamResolver {
         }
 
         val watchUrl = youtubeWatchUrlFromId(videoId)
+        val localResolution =
+            YouTubeAudioResolverRuntime.resolve(
+                videoId = videoId,
+                order =
+                    listOf(
+                        PlaybackResolverKind.NewPipe,
+                        PlaybackResolverKind.InnerTube,
+                        PlaybackResolverKind.YtDlp
+                    )
+            )
 
-        return when (
-            val resolution =
-                YouTubeAudioResolverRuntime.resolve(
-                    videoId = videoId,
-                    order =
-                        listOf(
-                            PlaybackResolverKind.NewPipe,
-                            PlaybackResolverKind.InnerTube,
-                            PlaybackResolverKind.YtDlp
-                        )
-                )
-        ) {
+        return when (localResolution) {
             is PlaybackResolutionResult.Success -> {
                 if (!PlaybackResolutionMonitor.isCurrent(track.id)) {
                     return null
                 }
 
                 ResolvedStreamRequestHeaders.put(
-                    url = resolution.stream.url,
-                    headers = resolution.stream.headers
+                    url = localResolution.stream.url,
+                    headers = localResolution.stream.headers
                 )
 
                 PlaybackResolutionMonitor.resolved(
                     trackId = track.id,
-                    resolver = resolution.stream.resolver
+                    resolver = localResolution.stream.resolver
                 )
 
                 track.copy(
-                    streamUrl = resolution.stream.url,
+                    streamUrl = localResolution.stream.url,
                     downloadUrl = watchUrl,
                     originalStreamUrl =
                         track.originalStreamUrl
@@ -99,18 +99,87 @@ class PlaybackStreamResolver {
             is PlaybackResolutionResult.VerificationRequired -> {
                 PlaybackResolutionMonitor.verificationRequired(
                     trackId = track.id,
-                    challenge = resolution.challenge
+                    challenge = localResolution.challenge
                 )
                 null
             }
 
-            is PlaybackResolutionResult.Failed -> {
+            is PlaybackResolutionResult.Failed ->
+                resolveWithZexlFallback(
+                    track = track,
+                    watchUrl = watchUrl,
+                    localFailure = localResolution.message
+                )
+        }
+    }
+
+    private suspend fun resolveWithZexlFallback(
+        track: Track,
+        watchUrl: String,
+        localFailure: String
+    ): Track? {
+        if (!ZexlPlaybackResolver.configured) {
+            PlaybackResolutionMonitor.failed(
+                trackId = track.id,
+                message = localFailure
+            )
+            return null
+        }
+
+        PlaybackResolutionMonitor.resolvingFallback(
+            trackId = track.id,
+            fallbackName = "ZEXL"
+        )
+
+        return try {
+            val candidate =
+                ZexlPlaybackResolver.resolve(watchUrl)
+
+            if (candidate == null) {
                 PlaybackResolutionMonitor.failed(
                     trackId = track.id,
-                    message = resolution.message
+                    message = localFailure
                 )
-                null
+                return null
             }
+
+            if (!PlaybackResolutionMonitor.isCurrent(track.id)) {
+                return null
+            }
+
+            ResolvedStreamRequestHeaders.put(
+                url = candidate.url,
+                headers = candidate.headers
+            )
+
+            PlaybackResolutionMonitor.resolvedFallback(
+                trackId = track.id,
+                fallbackName = "ZEXL"
+            )
+
+            track.copy(
+                streamUrl = candidate.url,
+                downloadUrl = watchUrl,
+                originalStreamUrl =
+                    track.originalStreamUrl
+                        ?: track.streamUrl
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            val fallbackMessage = error.message
+                ?.lineSequence()
+                ?.firstOrNull()
+                ?.take(180)
+                ?.takeIf(String::isNotBlank)
+                ?: "ZEXL backup failed."
+
+            PlaybackResolutionMonitor.failed(
+                trackId = track.id,
+                message =
+                    "Local resolvers failed and ZEXL backup could not prepare this track. $fallbackMessage"
+            )
+            null
         }
     }
 
