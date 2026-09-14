@@ -34,8 +34,8 @@ android {
         applicationId = "com.frxe.music"
         minSdk = 26
         targetSdk = 37
-        versionCode = 24
-        versionName = "0.6.6"
+        versionCode = 25
+        versionName = "0.6.7"
         buildConfigField("String", "OWNER", "\"void\"")
         buildConfigField("String", "PUBLISHER", "\"void\"")
         buildConfigField("String", "AUTHOR", "\"void\"")
