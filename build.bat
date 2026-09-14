@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 set "APP_NAME=Frxe"
-set "VERSION=0.6.6"
+set "VERSION=0.6.7"
 set "SIGNER=void"
 set "GRADLE_VERSION=9.6.0"
 set "TOOLS=.frxe-tools"
