@@ -55,6 +55,19 @@ object DownloadQueueStore {
                 System.currentTimeMillis()
             )
 
+            recovered
+                .asSequence()
+                .filter { item ->
+                    item.state == DownloadQueueItemState.Complete &&
+                        !item.savedUri.isNullOrBlank()
+                }
+                .forEach { item ->
+                    DownloadedTrackRegistry.register(
+                        sourceUrl = item.sourceUrl,
+                        localUri = item.savedUri
+                    )
+                }
+
             _items.value = recovered
             _wifiOnly.value = preferences.getBoolean(KEY_WIFI_ONLY, false)
             persistLocked(recovered)
