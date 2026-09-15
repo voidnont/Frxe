@@ -4,9 +4,6 @@ import android.app.Application
 import com.frxe.music.model.HomeSection
 import com.frxe.music.model.Track
 import com.frxe.music.playback.catalogMetadataUri
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 
 class YouTubeCatalogSource(application: Application) : CatalogSource {
     val enabled: Boolean = true
@@ -21,29 +18,35 @@ class YouTubeCatalogSource(application: Application) : CatalogSource {
         get() = CatalogLoadPolicy.providerOrder
             .mapNotNull(providersById::get)
 
+    private val searchCache =
+        CatalogSearchCache<List<Track>>(
+            ttlMs = CatalogLoadPolicy.searchCacheTtlMs
+        )
+
     override suspend fun home(): List<HomeSection> = emptyList()
 
     override suspend fun search(query: String): List<Track> {
         val normalized = query.trim()
         if (normalized.isEmpty()) return emptyList()
 
-        val providerResults = ArrayList<List<SearchHit>>(providers.size)
-        for (provider in providers) {
-            val hits = withContext(Dispatchers.IO) {
-                withTimeoutOrNull(
-                    CatalogLoadPolicy.timeoutFor(provider.id)
-                ) {
-                    runCatching {
-                        provider.search(normalized)
-                    }.getOrDefault(emptyList())
-                }.orEmpty()
-            }
-            providerResults += hits
-            if (hits.isNotEmpty()) break
-        }
+        searchCache.get(normalized)
+            ?.let { return it }
 
-        return selectPrioritySearchHits(
-            providerResults,
+        val hits = hedgedFirstNonEmpty(
+            providers.map { provider ->
+                CatalogHedgeTask(
+                    startDelayMs =
+                        CatalogLoadPolicy.hedgeDelayFor(provider.id),
+                    timeoutMs =
+                        CatalogLoadPolicy.timeoutFor(provider.id)
+                ) {
+                    provider.search(normalized)
+                }
+            }
+        )
+
+        val tracks = selectPrioritySearchHits(
+            providerResults = listOf(hits),
             limit = MAX_RESULTS
         ).map { hit ->
             Track(
@@ -58,6 +61,12 @@ class YouTubeCatalogSource(application: Application) : CatalogSource {
                     ?: "https://i.ytimg.com/vi/${hit.videoId}/hqdefault.jpg"
             )
         }
+
+        if (tracks.isNotEmpty()) {
+            searchCache.put(normalized, tracks)
+        }
+
+        return tracks
     }
 
     override suspend fun track(id: String): Track? = null
