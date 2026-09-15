@@ -28,74 +28,96 @@ object PlaybackPrefetcher {
         }
 
         scope.launch {
-            var lastRequestedEntryId: String? = null
+            var lastRequestedEntryIds: List<String> = emptyList()
 
             PlaybackQueueStore.state.collectLatest { state ->
-                val nextEntry =
-                    state.entries.getOrNull(state.currentIndex + 1)
+                val nextEntries =
+                    PlaybackPrefetchWindowPolicy
+                        .nextIndexes(
+                            currentIndex = state.currentIndex,
+                            totalCount = state.entries.size
+                        )
+                        .map { index -> state.entries[index] }
 
-                if (nextEntry == null) {
-                    lastRequestedEntryId = null
+                if (nextEntries.isEmpty()) {
+                    lastRequestedEntryIds = emptyList()
                     PlaybackPrefetchCache.clear()
                     return@collectLatest
                 }
 
-                if (nextEntry.entryId == lastRequestedEntryId) {
+                val nextEntryIds =
+                    nextEntries.map { it.entryId }
+
+                PlaybackPrefetchCache.retain(
+                    nextEntries.map { it.trackId }.toSet()
+                )
+
+                if (nextEntryIds == lastRequestedEntryIds) {
                     return@collectLatest
                 }
 
-                lastRequestedEntryId = nextEntry.entryId
+                lastRequestedEntryIds = nextEntryIds
 
-                val track =
-                    PlaybackQueueStore.run {
-                        nextEntry.toTrack()
+                for (nextEntry in nextEntries) {
+                    val track =
+                        PlaybackQueueStore.run {
+                            nextEntry.toTrack()
+                        }
+
+                    if (PlaybackPrefetchCache.forTrack(track) != null) {
+                        continue
                     }
 
-                val originalSource =
-                    track.originalStreamUrl
-                        ?.takeIf(String::isNotBlank)
-                        ?: track.streamUrl
+                    val originalSource =
+                        track.originalStreamUrl
+                            ?.takeIf(String::isNotBlank)
+                            ?: track.streamUrl
 
-                val videoId =
-                    YouTubeAudioResolverRuntime
-                        .videoIdFromSource(originalSource)
-                        ?: return@collectLatest
+                    val videoId =
+                        YouTubeAudioResolverRuntime
+                            .videoIdFromSource(originalSource)
 
-                when (
-                    val result =
-                        YouTubeAudioResolverRuntime.resolve(
-                            videoId = videoId,
-                            order = PlaybackPrefetchPolicy.resolverOrder
-                        )
-                ) {
-                    is PlaybackResolutionResult.Success -> {
-                        val watchUrl =
-                            PlaybackStreamResolver
-                                .youtubeWatchUrlFromId(videoId)
+                    if (videoId == null) {
+                        PlaybackPrefetchCache.remove(track.id)
+                        continue
+                    }
 
-                        val resolvedTrack =
-                            track.copy(
-                                streamUrl = result.stream.url,
-                                downloadUrl = watchUrl,
-                                originalStreamUrl = originalSource
+                    when (
+                        val result =
+                            YouTubeAudioResolverRuntime.resolve(
+                                videoId = videoId,
+                                order = PlaybackPrefetchPolicy.resolverOrder
+                            )
+                    ) {
+                        is PlaybackResolutionResult.Success -> {
+                            val watchUrl =
+                                PlaybackStreamResolver
+                                    .youtubeWatchUrlFromId(videoId)
+
+                            val resolvedTrack =
+                                track.copy(
+                                    streamUrl = result.stream.url,
+                                    downloadUrl = watchUrl,
+                                    originalStreamUrl = originalSource
+                                )
+
+                            ResolvedStreamRequestHeaders.put(
+                                url = result.stream.url,
+                                headers = result.stream.headers
                             )
 
-                        ResolvedStreamRequestHeaders.put(
-                            url = result.stream.url,
-                            headers = result.stream.headers
-                        )
+                            PlaybackPrefetchCache.put(
+                                track = resolvedTrack,
+                                resolver = result.stream.resolver,
+                                headers = result.stream.headers,
+                                originalSource = originalSource
+                            )
+                        }
 
-                        PlaybackPrefetchCache.put(
-                            track = resolvedTrack,
-                            resolver = result.stream.resolver,
-                            headers = result.stream.headers,
-                            originalSource = originalSource
-                        )
+                        is PlaybackResolutionResult.VerificationRequired,
+                        is PlaybackResolutionResult.Failed ->
+                            PlaybackPrefetchCache.remove(track.id)
                     }
-
-                    is PlaybackResolutionResult.VerificationRequired,
-                    is PlaybackResolutionResult.Failed ->
-                        PlaybackPrefetchCache.clear()
                 }
             }
         }
