@@ -199,13 +199,9 @@ class IslandHubOverlayController(
             minimumHeight = dp(COMPACT_MIN_HEIGHT_DP)
             background = islandDrawable(expanded = false)
             setOnClickListener {
-                if (!expanded) {
-                    openFrxe()
-                }
-            }
-            setOnLongClickListener {
-                setExpanded(!expanded)
-                true
+                setExpanded(
+                    IslandInteractionPolicy.nextExpandedState(expanded)
+                )
             }
         }
         rootView = root
