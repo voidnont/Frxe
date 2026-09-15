@@ -8,6 +8,14 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+internal object PlaybackResolverOrder {
+    val local: List<PlaybackResolverKind> = listOf(
+        PlaybackResolverKind.InnerTube,
+        PlaybackResolverKind.NewPipe,
+        PlaybackResolverKind.YtDlp
+    )
+}
+
 class PlaybackStreamResolver {
     suspend fun resolve(
         track: Track
@@ -63,12 +71,7 @@ class PlaybackStreamResolver {
         val localResolution =
             YouTubeAudioResolverRuntime.resolve(
                 videoId = videoId,
-                order =
-                    listOf(
-                        PlaybackResolverKind.NewPipe,
-                        PlaybackResolverKind.InnerTube,
-                        PlaybackResolverKind.YtDlp
-                    )
+                order = PlaybackResolverOrder.local
             )
 
         return when (localResolution) {
