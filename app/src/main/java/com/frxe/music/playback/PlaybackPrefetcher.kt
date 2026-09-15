@@ -1,7 +1,6 @@
 package com.frxe.music.playback
 
 import com.frxe.music.source.PlaybackResolutionResult
-import com.frxe.music.source.PlaybackResolverKind
 import com.frxe.music.source.PlaybackStreamResolver
 import com.frxe.music.source.YouTubeAudioResolverRuntime
 import kotlinx.coroutines.CoroutineScope
@@ -66,12 +65,7 @@ object PlaybackPrefetcher {
                     val result =
                         YouTubeAudioResolverRuntime.resolve(
                             videoId = videoId,
-                            order =
-                                listOf(
-                                    PlaybackResolverKind.NewPipe,
-                                    PlaybackResolverKind.InnerTube,
-                                    PlaybackResolverKind.YtDlp
-                                )
+                            order = PlaybackPrefetchPolicy.resolverOrder
                         )
                 ) {
                     is PlaybackResolutionResult.Success -> {
