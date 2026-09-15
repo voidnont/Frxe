@@ -52,71 +52,73 @@ jobs:
           @RunWith(AndroidJUnit4::class)
           class FrxeAndroidSpeedProbeTest {
               @Test
-              fun measureRealSearchResolveAndQueueHandoff() = runBlocking {
-                  val app = InstrumentationRegistry.getInstrumentation()
-                      .targetContext.applicationContext as Application
-                  val source = YouTubeCatalogSource(app)
+              fun measureRealSearchResolveAndQueueHandoff() {
+                  runBlocking {
+                      val app = InstrumentationRegistry.getInstrumentation()
+                          .targetContext.applicationContext as Application
+                      val source = YouTubeCatalogSource(app)
 
-                  var coldResults: List<Track> = emptyList()
-                  val coldSearchMs = measureTimeMillis {
-                      coldResults = source.search("Daft Punk")
-                  }
-                  Log.i(TAG, "search_cold_ms=$coldSearchMs results=${coldResults.size}")
-
-                  var warmResults: List<Track> = emptyList()
-                  val warmSearchMs = measureTimeMillis {
-                      warmResults = source.search("Daft Punk")
-                  }
-                  Log.i(TAG, "search_warm_ms=$warmSearchMs results=${warmResults.size}")
-
-                  if (coldResults.isNotEmpty()) {
-                      assertEquals(coldResults.map(Track::id), warmResults.map(Track::id))
-                      assertTrue("cached search took ${warmSearchMs}ms", warmSearchMs < 250L)
-
-                      val resolver = PlaybackStreamResolver()
-                      var resolvedFirst: Track? = null
-                      val firstResolveMs = measureTimeMillis {
-                          resolvedFirst = resolver.resolve(coldResults.first())
+                      var coldResults: List<Track> = emptyList()
+                      val coldSearchMs = measureTimeMillis {
+                          coldResults = source.search("Daft Punk")
                       }
-                      Log.i(TAG, "first_track_resolve_ms=$firstResolveMs success=${resolvedFirst != null}")
+                      Log.i(TAG, "search_cold_ms=$coldSearchMs results=${coldResults.size}")
 
-                      if (coldResults.size >= 2) {
-                          PlaybackPrefetchCache.clear()
-                          PlaybackQueueStore.replace(
-                              tracks = coldResults.take(3),
-                              currentTrackId = coldResults.first().id
-                          )
+                      var warmResults: List<Track> = emptyList()
+                      val warmSearchMs = measureTimeMillis {
+                          warmResults = source.search("Daft Punk")
+                      }
+                      Log.i(TAG, "search_warm_ms=$warmSearchMs results=${warmResults.size}")
 
-                          val next = coldResults[1]
-                          var waitedMs = 0L
-                          while (
-                              PlaybackPrefetchCache.forTrack(next) == null &&
-                              waitedMs < 15_000L
-                          ) {
-                              delay(100L)
-                              waitedMs += 100L
+                      if (coldResults.isNotEmpty()) {
+                          assertEquals(coldResults.map(Track::id), warmResults.map(Track::id))
+                          assertTrue("cached search took ${warmSearchMs}ms", warmSearchMs < 250L)
+
+                          val resolver = PlaybackStreamResolver()
+                          var resolvedFirst: Track? = null
+                          val firstResolveMs = measureTimeMillis {
+                              resolvedFirst = resolver.resolve(coldResults.first())
                           }
+                          Log.i(TAG, "first_track_resolve_ms=$firstResolveMs success=${resolvedFirst != null}")
 
-                          val prefetched = PlaybackPrefetchCache.forTrack(next) != null
-                          var resolvedNext: Track? = null
-                          val handoffResolveMs = measureTimeMillis {
-                              resolvedNext = resolver.resolve(next)
-                          }
-                          Log.i(
-                              TAG,
-                              "next_prefetch_ready=$prefetched prefetch_wait_ms=$waitedMs " +
-                                  "handoff_resolve_ms=$handoffResolveMs success=${resolvedNext != null}"
-                          )
-
-                          if (prefetched) {
-                              assertTrue(
-                                  "prefetched handoff took ${handoffResolveMs}ms",
-                                  handoffResolveMs < 250L
+                          if (coldResults.size >= 2) {
+                              PlaybackPrefetchCache.clear()
+                              PlaybackQueueStore.replace(
+                                  tracks = coldResults.take(3),
+                                  currentTrackId = coldResults.first().id
                               )
+
+                              val next = coldResults[1]
+                              var waitedMs = 0L
+                              while (
+                                  PlaybackPrefetchCache.forTrack(next) == null &&
+                                  waitedMs < 15_000L
+                              ) {
+                                  delay(100L)
+                                  waitedMs += 100L
+                              }
+
+                              val prefetched = PlaybackPrefetchCache.forTrack(next) != null
+                              var resolvedNext: Track? = null
+                              val handoffResolveMs = measureTimeMillis {
+                                  resolvedNext = resolver.resolve(next)
+                              }
+                              Log.i(
+                                  TAG,
+                                  "next_prefetch_ready=$prefetched prefetch_wait_ms=$waitedMs " +
+                                      "handoff_resolve_ms=$handoffResolveMs success=${resolvedNext != null}"
+                              )
+
+                              if (prefetched) {
+                                  assertTrue(
+                                      "prefetched handoff took ${handoffResolveMs}ms",
+                                      handoffResolveMs < 250L
+                                  )
+                              }
                           }
+                      } else {
+                          Log.i(TAG, "network_result=empty hosted_runner_may_be_blocked=true")
                       }
-                  } else {
-                      Log.i(TAG, "network_result=empty hosted_runner_may_be_blocked=true")
                   }
               }
 
@@ -137,7 +139,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: adb logcat -c; gradle --no-daemon :app:connectedDebugAndroidTest; STATUS=$?; echo '=== FRXE speed metrics ==='; adb logcat -d -s FRXE_SPEED:I '*:S' | tee frxe-speed.log; echo '=== FRXE cold app launch ==='; adb shell am force-stop com.frxe.music; adb shell am start -W -n com.frxe.music/.MainActivity | tee frxe-startup.txt; exit $STATUS
+          script: adb logcat -c; gradle --no-daemon :app:connectedDebugAndroidTest; STATUS=$?; echo '=== FRXE speed metrics ==='; adb logcat -d -s FRXE_SPEED:I '*:S' | tee frxe-speed.log; gradle --no-daemon :app:installDebug >/dev/null; echo '=== FRXE cold app launch ==='; adb shell am force-stop com.frxe.music; adb shell am start -W -n com.frxe.music/.MainActivity | tee frxe-startup.txt; exit $STATUS
       - uses: actions/upload-artifact@v4
         if: always()
         with:
