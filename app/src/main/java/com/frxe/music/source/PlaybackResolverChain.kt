@@ -50,7 +50,7 @@ internal data class PlaybackResolverHedgePolicy(
     val localBudgetMs: Long = 8_000L
 )
 
-class PlaybackResolverChain(
+internal class PlaybackResolverChain(
     private val resolvers: List<
         Pair<
             PlaybackResolverKind,
