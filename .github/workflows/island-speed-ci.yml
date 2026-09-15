@@ -17,10 +17,5 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
-      - name: Run Island and catalog regression tests
-        run: >-
-          gradle --no-daemon :app:testDebugUnitTest
-          --tests com.frxe.music.island.IslandPresentationPolicyTest
-          --tests com.frxe.music.island.IslandArtworkPolicyTest
-          --tests com.frxe.music.island.IslandWaveformPolicyTest
-          --tests com.frxe.music.source.CatalogLoadPolicyTest
+      - name: Run full debug verification
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
