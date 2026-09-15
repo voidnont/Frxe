@@ -26,14 +26,7 @@ fun FrxeViewModel.playQueued(
     track: Track,
     queue: List<Track> = emptyList()
 ) {
-    val actualQueue = queue.ifEmpty {
-        listOf(track)
-    }
-
-    PlaybackQueueStore.replaceAndRequestPlay(
-        tracks = actualQueue,
-        currentTrackId = track.id
-    )
+    play(track, queue)
 }
 
 fun FrxeViewModel.playNext(

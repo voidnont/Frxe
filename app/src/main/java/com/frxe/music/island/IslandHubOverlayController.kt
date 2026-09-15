@@ -5,6 +5,8 @@ import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -19,13 +21,17 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.media3.common.Player
 import com.frxe.music.MainActivity
+import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.math.absoluteValue
 import kotlin.math.max
@@ -43,7 +49,12 @@ class IslandHubOverlayController(
     private var rightCameraSide: FrameLayout? = null
     private var titleView: TextView? = null
     private var artistView: TextView? = null
-    private var artworkDot: View? = null
+    private var artworkView: ImageView? = null
+    private var largeArtworkView: ImageView? = null
+    private var currentArtworkBitmap: Bitmap? = null
+    private var loadedArtworkUrl: String? = null
+    private var artworkLoadingUrl: String? = null
+    private var artworkLoadToken: Long = 0L
     private var waveView: IslandWaveView? = null
     private var progressView: ProgressBar? = null
     private var queueView: TextView? = null
@@ -76,12 +87,15 @@ class IslandHubOverlayController(
         }
 
         val hasTrack = currentMediaId != null
+        val dismissed = dismissedMediaId == currentMediaId
         if (
-            FrxeAppVisibility.isForeground ||
-            !state.floatingEnabled ||
-            !state.overlayPermissionGranted ||
-            !hasTrack ||
-            dismissedMediaId == currentMediaId
+            !IslandPresentationPolicy.showFloating(
+                isForeground = FrxeAppVisibility.isForeground,
+                floatingEnabled = state.floatingEnabled,
+                overlayPermissionGranted = state.overlayPermissionGranted,
+                hasTrack = hasTrack,
+                dismissed = dismissed
+            )
         ) {
             dismiss()
             return
@@ -106,7 +120,8 @@ class IslandHubOverlayController(
         rightCameraSide = null
         titleView = null
         artistView = null
-        artworkDot = null
+        artworkView = null
+        largeArtworkView = null
         waveView = null
         progressView = null
         queueView = null
@@ -204,11 +219,16 @@ class IslandHubOverlayController(
 
         val left = FrameLayout(context)
         leftCameraSide = left
-        artworkDot = View(context).apply {
-            background = dotDrawable(Color.WHITE)
+        artworkView = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            background = roundedArtworkDrawable(
+                Color.rgb(72, 72, 72),
+                radiusDp = 8
+            )
+            clipToOutline = true
         }
         left.addView(
-            artworkDot,
+            artworkView,
             FrameLayout.LayoutParams(
                 dp(27),
                 dp(27),
@@ -270,6 +290,7 @@ class IslandHubOverlayController(
         if (!expanded) {
             titleView = null
             artistView = null
+            largeArtworkView = null
             progressView = null
             queueView = null
             expandedPlayButton = null
@@ -282,13 +303,17 @@ class IslandHubOverlayController(
             setPadding(dp(14), dp(5), dp(14), 0)
         }
 
-        val largeArtwork = View(context).apply {
-            background = artworkDot?.background?.constantState
-                ?.newDrawable()
-                ?: dotDrawable(Color.WHITE)
+        largeArtworkView = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            background = roundedArtworkDrawable(
+                Color.rgb(72, 72, 72),
+                radiusDp = 14
+            )
+            clipToOutline = true
+            currentArtworkBitmap?.let(::setImageBitmap)
         }
         details.addView(
-            largeArtwork,
+            largeArtworkView,
             LinearLayout.LayoutParams(
                 dp(48),
                 dp(48)
@@ -487,8 +512,10 @@ class IslandHubOverlayController(
         val r = 72 + seed % 118
         val g = 72 + (seed / 7) % 118
         val b = 72 + (seed / 13) % 118
-        artworkDot?.background =
-            dotDrawable(Color.rgb(r, g, b))
+        updateArtwork(
+            rawUrl = item.mediaMetadata.artworkUri?.toString(),
+            fallbackColor = Color.rgb(r, g, b)
+        )
 
         titleView?.text =
             item.mediaMetadata.title
@@ -535,7 +562,97 @@ class IslandHubOverlayController(
             }
         )
 
-        waveView?.invalidate()
+        waveView?.setPlaying(player.isPlaying)
+    }
+
+    private fun updateArtwork(
+        rawUrl: String?,
+        fallbackColor: Int
+    ) {
+        val normalized = IslandArtworkPolicy.normalize(rawUrl)
+
+        artworkView?.background = roundedArtworkDrawable(
+            fallbackColor,
+            radiusDp = 8
+        )
+        largeArtworkView?.background = roundedArtworkDrawable(
+            fallbackColor,
+            radiusDp = 14
+        )
+
+        if (normalized == null) {
+            artworkLoadToken += 1L
+            loadedArtworkUrl = null
+            artworkLoadingUrl = null
+            currentArtworkBitmap = null
+            artworkView?.setImageDrawable(null)
+            largeArtworkView?.setImageDrawable(null)
+            return
+        }
+
+        if (loadedArtworkUrl == normalized && currentArtworkBitmap != null) {
+            applyCurrentArtwork()
+            return
+        }
+
+        ARTWORK_CACHE[normalized]?.let { cached ->
+            loadedArtworkUrl = normalized
+            artworkLoadingUrl = null
+            currentArtworkBitmap = cached
+            applyCurrentArtwork()
+            return
+        }
+
+        if (artworkLoadingUrl == normalized) {
+            return
+        }
+
+        artworkLoadingUrl = normalized
+        loadedArtworkUrl = normalized
+        currentArtworkBitmap = null
+        artworkView?.setImageDrawable(null)
+        largeArtworkView?.setImageDrawable(null)
+        val token = ++artworkLoadToken
+
+        Thread {
+            val bitmap = runCatching {
+                val connection = URL(normalized).openConnection().apply {
+                    connectTimeout = 4_000
+                    readTimeout = 6_000
+                    setRequestProperty(
+                        "User-Agent",
+                        "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/152 Mobile Safari/537.36"
+                    )
+                    setRequestProperty(
+                        "Accept",
+                        "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+                    )
+                }
+                connection.getInputStream().use(BitmapFactory::decodeStream)
+            }.getOrNull()
+
+            mainHandler.post {
+                if (
+                    token != artworkLoadToken ||
+                    loadedArtworkUrl != normalized
+                ) {
+                    return@post
+                }
+
+                artworkLoadingUrl = null
+                if (bitmap != null) {
+                    ARTWORK_CACHE[normalized] = bitmap
+                    currentArtworkBitmap = bitmap
+                    applyCurrentArtwork()
+                }
+            }
+        }.start()
+    }
+
+    private fun applyCurrentArtwork() {
+        val bitmap = currentArtworkBitmap ?: return
+        artworkView?.setImageBitmap(bitmap)
+        largeArtworkView?.setImageBitmap(bitmap)
     }
 
     private fun resizeWindow(
@@ -753,14 +870,16 @@ class IslandHubOverlayController(
         ).toFloat()
     }
 
-    private fun dotDrawable(
-        color: Int
+    private fun roundedArtworkDrawable(
+        color: Int,
+        radiusDp: Int
     ) = GradientDrawable().apply {
-        shape = GradientDrawable.OVAL
+        shape = GradientDrawable.RECTANGLE
         setColor(color)
+        cornerRadius = dp(radiusDp).toFloat()
         setStroke(
             dp(1),
-            Color.argb(105, 255, 255, 255)
+            Color.argb(90, 255, 255, 255)
         )
     }
 
@@ -786,33 +905,57 @@ class IslandHubOverlayController(
             color = Color.WHITE
         }
 
+        private var phase = 0f
+        private var playing = false
+
+        private val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 900L
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            addUpdateListener { valueAnimator ->
+                phase = valueAnimator.animatedValue as Float
+                invalidate()
+            }
+        }
+
+        fun setPlaying(value: Boolean) {
+            if (playing == value) return
+            playing = value
+
+            if (playing) {
+                animator.start()
+            } else {
+                animator.cancel()
+                phase = 0f
+                invalidate()
+            }
+        }
+
+        override fun onDetachedFromWindow() {
+            animator.cancel()
+            super.onDetachedFromWindow()
+        }
+
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
 
             val barWidth = width / 9f
             val gap = barWidth
-            val phase =
-                (System.currentTimeMillis() / 140L)
-                    .toInt()
+            val levels = IslandWaveformPolicy.levels(
+                phase = phase,
+                isPlaying = playing
+            )
 
-            repeat(4) { index ->
-                val activity = if (player.isPlaying) {
-                    ((phase + index * 2) % 5) / 4f
-                } else {
-                    0.15f
-                }
-                val minHeight = height * 0.22f
+            levels.forEachIndexed { index, activity ->
+                val minHeight = height * 0.18f
                 val barHeight =
                     minHeight +
-                        (height * 0.66f * activity)
+                        (height * 0.76f * activity)
                 val left = gap + index * (barWidth + gap)
                 val top = (height - barHeight) / 2f
                 val radius = barWidth / 2f
-                paint.alpha = if (player.isPlaying) {
-                    225
-                } else {
-                    125
-                }
+                paint.alpha = if (playing) 225 else 125
+
                 canvas.drawRoundRect(
                     left,
                     top,
@@ -827,6 +970,8 @@ class IslandHubOverlayController(
     }
 
     companion object {
+        private val ARTWORK_CACHE = ConcurrentHashMap<String, Bitmap>()
+
         private const val COLLAPSED_WIDTH_DP = 174
         private const val EXPANDED_WIDTH_DP = 344
         private const val COMPACT_MIN_HEIGHT_DP = 40

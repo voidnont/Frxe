@@ -11,18 +11,29 @@ import kotlinx.coroutines.coroutineScope
 class RecommendationRepository(
     private val search: suspend (String) -> List<Track>
 ) {
-    fun localSections(history: List<Track>, library: List<Track>): List<HomeSection> = buildList {
+    fun localSections(
+        history: List<Track>,
+        library: List<Track>
+    ): List<HomeSection> = buildList {
         if (history.isNotEmpty()) {
             add(
                 HomeSection(
                     title = "Recently played",
                     subtitle = "Your real listening history",
-                    tracks = history.distinctBy(Track::id).take(12)
+                    tracks = history
+                        .distinctBy(Track::id)
+                        .take(12)
                 )
             )
         }
-        val historyIds = history.mapTo(HashSet(), Track::id)
-        val libraryOnly = library.filterNot { it.id in historyIds }.distinctBy(Track::id).take(12)
+
+        val historyIds = history
+            .mapTo(HashSet(), Track::id)
+        val libraryOnly = library
+            .filterNot { it.id in historyIds }
+            .distinctBy(Track::id)
+            .take(12)
+
         if (libraryOnly.isNotEmpty()) {
             add(
                 HomeSection(
@@ -39,8 +50,11 @@ class RecommendationRepository(
         library: List<Track>,
         likedIds: Set<String>
     ): List<HomeSection> = coroutineScope {
-        val historySignals = history.map(Track::toRecommendationSignal)
-        val librarySignals = library.map(Track::toRecommendationSignal)
+        val historySignals = history
+            .map(Track::toRecommendationSignal)
+        val librarySignals = library
+            .map(Track::toRecommendationSignal)
+
         val queries = buildRecommendationQueries(
             history = historySignals,
             library = librarySignals,
@@ -50,7 +64,9 @@ class RecommendationRepository(
 
         val queryResults = queries.map { query ->
             async(Dispatchers.IO) {
-                query to runCatching { search(query.text) }.getOrDefault(emptyList())
+                query to runCatching {
+                    search(query.text)
+                }.getOrDefault(emptyList())
             }
         }.awaitAll()
 
@@ -78,69 +94,100 @@ class RecommendationRepository(
             history = historySignals,
             library = librarySignals,
             likedIds = likedIds,
-            limit = 36
+            limit = 48
         )
-        val rankedTracks = ranked.mapNotNull { tracksById[it.id] }
+        val rankedTracks = ranked
+            .mapNotNull { tracksById[it.id] }
 
-        val sections = ArrayList<HomeSection>()
-        sections += localSections(history, library)
-
-        if (rankedTracks.isNotEmpty()) {
-            sections += HomeSection(
-                title = if (history.isEmpty() && library.isEmpty()) "Popular for you" else "Made for you",
-                subtitle = if (history.isEmpty() && library.isEmpty()) {
-                    "Real tracks to start shaping your recommendations"
-                } else {
-                    "Ranked from your recent listening, likes and library"
-                },
-                tracks = rankedTracks.take(12)
-            )
-        }
-
-        val favoriteQuery = queries.firstOrNull { it.kind == RecommendationQueryKind.FavoriteArtist }
-        if (favoriteQuery?.seedArtist != null) {
-            val favoriteTracks = ranked
-                .filter { sourceQueryById[it.id]?.seedArtist == favoriteQuery.seedArtist }
-                .mapNotNull { tracksById[it.id] }
-                .filterNot { candidate -> history.any { it.title.equals(candidate.title, true) && it.artist.equals(candidate.artist, true) } }
-                .distinctBy(Track::id)
-                .take(12)
-            if (favoriteTracks.isNotEmpty()) {
-                sections += HomeSection(
-                    title = "Because you listen to ${favoriteQuery.seedArtist}",
-                    subtitle = "More from an artist Frxe sees in your taste",
-                    tracks = favoriteTracks
-                )
+        val favoriteQuery = queries
+            .firstOrNull {
+                it.kind == RecommendationQueryKind.FavoriteArtist
             }
-        }
+
+        val favoriteTracks = ranked
+            .filter { candidate ->
+                candidate.queryKind == RecommendationQueryKind.FavoriteArtist &&
+                    (
+                        favoriteQuery?.seedArtist == null ||
+                            sourceQueryById[candidate.id]
+                                ?.seedArtist == favoriteQuery.seedArtist
+                        )
+            }
+            .mapNotNull { tracksById[it.id] }
+            .filterNot { candidate ->
+                history.any {
+                    it.title.equals(candidate.title, true) &&
+                        it.artist.equals(candidate.artist, true)
+                }
+            }
+            .distinctBy(Track::id)
+            .take(12)
+            .ifEmpty {
+                rankedTracks.take(12)
+            }
 
         val discoveryTracks = ranked
             .filter { candidate ->
                 candidate.queryKind == RecommendationQueryKind.Discovery ||
-                    isDiscoveryCandidate(candidate, historySignals, librarySignals)
+                    isDiscoveryCandidate(
+                        candidate,
+                        historySignals,
+                        librarySignals
+                    )
             }
             .mapNotNull { tracksById[it.id] }
-            .filterNot { track -> rankedTracks.take(8).any { it.id == track.id } }
+            .filterNot { track ->
+                favoriteTracks.any { it.id == track.id }
+            }
             .distinctBy(Track::id)
             .take(12)
 
-        if (discoveryTracks.isNotEmpty()) {
+        val trendingTracks = ranked
+            .filter {
+                it.queryKind == RecommendationQueryKind.Trending
+            }
+            .mapNotNull { tracksById[it.id] }
+            .distinctBy(Track::id)
+            .take(12)
+
+        val generatedPlaylists =
+            PersonalizedPlaylistPolicy.build(
+                favoriteArtist = favoriteQuery?.seedArtist,
+                favoriteTracks = favoriteTracks,
+                discoveryTracks = discoveryTracks,
+                trendingTracks = trendingTracks
+            )
+
+        val sections = ArrayList<HomeSection>()
+        sections += localSections(history, library)
+        sections += generatedPlaylists
+
+        if (
+            generatedPlaylists.isEmpty() &&
+            rankedTracks.isNotEmpty()
+        ) {
             sections += HomeSection(
-                title = "Discover something new",
-                subtitle = "A little farther from what you already play",
-                tracks = discoveryTracks
+                title = "FRXE Mix",
+                subtitle = "A fresh blend from the catalog",
+                tracks = rankedTracks.take(12)
             )
         }
 
         sections
-            .map { section -> section.copy(tracks = section.tracks.distinctBy(Track::id)) }
+            .map { section ->
+                section.copy(
+                    tracks = section.tracks
+                        .distinctBy(Track::id)
+                )
+            }
             .filter { it.tracks.isNotEmpty() }
-            .take(5)
+            .take(6)
     }
 }
 
-private fun Track.toRecommendationSignal() = RecommendationSignal(
-    id = id,
-    title = title,
-    artist = artist
-)
+private fun Track.toRecommendationSignal() =
+    RecommendationSignal(
+        id = id,
+        title = title,
+        artist = artist
+    )

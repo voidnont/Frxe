@@ -56,6 +56,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.frxe.music.island.IslandPresentationPolicy
 import com.frxe.music.model.Track
 import com.frxe.music.source.PlaybackResolutionMonitor
 import com.frxe.music.source.PlaybackResolutionStage
@@ -298,6 +299,7 @@ fun FrxeApp(viewModel: FrxeViewModel) {
         }
 
         if (
+            IslandPresentationPolicy.showInApp &&
             !isTv &&
             !playerOpen &&
             islandHub.inAppEnabled &&
