@@ -6,12 +6,12 @@ import org.junit.Test
 
 class PlaybackPrefetchPolicyTest {
     @Test
-    fun prefetchKeepsYouTubeMusicFirst() {
+    fun prefetchKeepsYtDlpFirst() {
         assertEquals(
             listOf(
+                PlaybackResolverKind.YtDlp,
                 PlaybackResolverKind.InnerTube,
-                PlaybackResolverKind.NewPipe,
-                PlaybackResolverKind.YtDlp
+                PlaybackResolverKind.NewPipe
             ),
             PlaybackPrefetchPolicy.resolverOrder
         )
