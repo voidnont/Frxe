@@ -19,7 +19,9 @@ object PlayerGesturePolicy {
         deltaYDp: Float,
         enabled: Boolean,
         isTv: Boolean,
-        blocked: Boolean
+        blocked: Boolean,
+        childConsumed: Boolean = false,
+        canCollapse: Boolean = true
     ): PlayerGestureAction {
         if (!enabled || isTv || blocked) {
             return PlayerGestureAction.None
@@ -32,6 +34,10 @@ object PlayerGesturePolicy {
             absX >= HORIZONTAL_THRESHOLD_DP &&
             absX > absY * DIRECTION_DOMINANCE
         ) {
+            if (childConsumed) {
+                return PlayerGestureAction.None
+            }
+
             return if (deltaXDp < 0f) {
                 PlayerGestureAction.Next
             } else {
@@ -43,7 +49,11 @@ object PlayerGesturePolicy {
             deltaYDp >= VERTICAL_THRESHOLD_DP &&
             absY > absX * DIRECTION_DOMINANCE
         ) {
-            return PlayerGestureAction.Collapse
+            return if (canCollapse) {
+                PlayerGestureAction.Collapse
+            } else {
+                PlayerGestureAction.None
+            }
         }
 
         return PlayerGestureAction.None
