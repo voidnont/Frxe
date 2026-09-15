@@ -1,6 +1,7 @@
 package com.frxe.music.source
 
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,9 +34,14 @@ suspend fun <T> hedgedFirstNonEmpty(
                 delay(task.startDelayMs)
             }
 
-            val value = withTimeoutOrNull(task.timeoutMs) {
-                runCatching(task.block)
-                    .getOrDefault(emptyList())
+            val value: List<T> = withTimeoutOrNull(task.timeoutMs) {
+                try {
+                    task.block()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    emptyList()
+                }
             }.orEmpty()
 
             if (value.isNotEmpty()) {
