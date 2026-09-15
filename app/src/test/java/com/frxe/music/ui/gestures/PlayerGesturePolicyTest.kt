@@ -95,4 +95,51 @@ class PlayerGesturePolicyTest {
             PlayerGesturePolicy.action(-100f, 0f, enabled = true, isTv = false, blocked = true)
         )
     }
+
+    @Test
+    fun childConsumedHorizontalSwipeDoesNothing() {
+        assertEquals(
+            PlayerGestureAction.None,
+            PlayerGesturePolicy.action(
+                deltaXDp = -100f,
+                deltaYDp = 0f,
+                enabled = true,
+                isTv = false,
+                blocked = false,
+                childConsumed = true
+            )
+        )
+    }
+
+    @Test
+    fun consumedDownwardSwipeCanCollapseAtTop() {
+        assertEquals(
+            PlayerGestureAction.Collapse,
+            PlayerGesturePolicy.action(
+                deltaXDp = 0f,
+                deltaYDp = 120f,
+                enabled = true,
+                isTv = false,
+                blocked = false,
+                childConsumed = true,
+                canCollapse = true
+            )
+        )
+    }
+
+    @Test
+    fun downwardSwipeDoesNotCollapseWhileListCanScrollBack() {
+        assertEquals(
+            PlayerGestureAction.None,
+            PlayerGesturePolicy.action(
+                deltaXDp = 0f,
+                deltaYDp = 120f,
+                enabled = true,
+                isTv = false,
+                blocked = false,
+                childConsumed = true,
+                canCollapse = false
+            )
+        )
+    }
 }
