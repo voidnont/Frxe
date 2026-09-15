@@ -1,5 +1,15 @@
 package com.frxe.music.source
 
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+
 enum class PlaybackResolverKind {
     NewPipe,
     InnerTube,
@@ -35,6 +45,10 @@ sealed interface PlaybackResolutionResult {
     ) : PlaybackResolutionResult
 }
 
+internal object PlaybackResolverHedgePolicy {
+    const val ytDlpHeadStartMs = 750L
+}
+
 class PlaybackResolverChain(
     private val resolvers: List<
         Pair<
@@ -44,74 +58,174 @@ class PlaybackResolverChain(
     >
 ) {
     suspend fun resolve(): PlaybackResolutionResult {
-        val attempts = mutableListOf<PlaybackResolverAttempt>()
-        var firstChallenge: YouTubeChallenge? = null
+        if (
+            resolvers.size > 1 &&
+            resolvers.first().first == PlaybackResolverKind.YtDlp
+        ) {
+            return resolveYtDlpFirstHedged()
+        }
 
-        for ((kind, resolver) in resolvers) {
-            try {
-                val candidate = resolver()
-                val normalizedUrl = candidate
-                    ?.url
-                    ?.trim()
-                    ?.takeIf {
-                        it.startsWith(
-                            "https://",
-                            ignoreCase = true
-                        ) || it.startsWith(
-                            "http://",
-                            ignoreCase = true
+        return resolveSequentially()
+    }
+
+    private suspend fun resolveYtDlpFirstHedged(): PlaybackResolutionResult {
+        val result = CompletableDeferred<PlaybackResolutionResult>()
+        val primaryFinished = CompletableDeferred<Unit>()
+        val remaining = AtomicInteger(resolvers.size)
+        val attempts = arrayOfNulls<PlaybackResolverAttempt>(resolvers.size)
+        val attemptsLock = Any()
+        val scope = CoroutineScope(
+            SupervisorJob() + Dispatchers.IO
+        )
+
+        fun snapshotAttempts(): List<PlaybackResolverAttempt> =
+            synchronized(attemptsLock) {
+                attempts.filterNotNull()
+            }
+
+        resolvers.forEachIndexed { index, (kind, resolver) ->
+            scope.launch {
+                try {
+                    if (index > 0) {
+                        withTimeoutOrNull(
+                            PlaybackResolverHedgePolicy.ytDlpHeadStartMs
+                        ) {
+                            primaryFinished.await()
+                        }
+
+                        if (result.isCompleted) {
+                            return@launch
+                        }
+                    }
+
+                    val outcome = runAttempt(kind, resolver)
+
+                    synchronized(attemptsLock) {
+                        attempts[index] = outcome.attempt
+                    }
+
+                    if (
+                        outcome.candidate != null &&
+                        outcome.normalizedUrl != null
+                    ) {
+                        result.complete(
+                            PlaybackResolutionResult.Success(
+                                stream = PlaybackResolvedStream(
+                                    url = outcome.normalizedUrl,
+                                    resolver = kind,
+                                    headers = outcome.candidate.headers
+                                ),
+                                attempts = snapshotAttempts()
+                            )
+                        )
+                    } else if (
+                        remaining.decrementAndGet() == 0
+                    ) {
+                        result.complete(
+                            terminalResult(snapshotAttempts())
                         )
                     }
-
-                attempts += PlaybackResolverAttempt(
-                    resolver = kind,
-                    errorMessage = if (normalizedUrl == null) {
-                        "No playable audio URL returned."
-                    } else {
-                        null
+                } finally {
+                    if (index == 0) {
+                        primaryFinished.complete(Unit)
                     }
-                )
-
-                if (
-                    candidate != null &&
-                    normalizedUrl != null
-                ) {
-                    return PlaybackResolutionResult.Success(
-                        stream = PlaybackResolvedStream(
-                            url = normalizedUrl,
-                            resolver = kind,
-                            headers = candidate.headers
-                        ),
-                        attempts = attempts.toList()
-                    )
                 }
-            } catch (error: Throwable) {
-                val challenge = YouTubeChallengeHandler
-                    .classify(error)
+            }
+        }
 
-                if (
-                    firstChallenge == null &&
-                    challenge != null
-                ) {
-                    firstChallenge = challenge
-                }
+        return try {
+            result.await()
+        } finally {
+            scope.cancel()
+        }
+    }
 
-                attempts += PlaybackResolverAttempt(
-                    resolver = kind,
-                    errorMessage = error.message
-                        ?.take(180),
-                    challenge = challenge
+    private suspend fun resolveSequentially(): PlaybackResolutionResult {
+        val attempts = mutableListOf<PlaybackResolverAttempt>()
+
+        for ((kind, resolver) in resolvers) {
+            val outcome = runAttempt(kind, resolver)
+            attempts += outcome.attempt
+
+            if (
+                outcome.candidate != null &&
+                outcome.normalizedUrl != null
+            ) {
+                return PlaybackResolutionResult.Success(
+                    stream = PlaybackResolvedStream(
+                        url = outcome.normalizedUrl,
+                        resolver = kind,
+                        headers = outcome.candidate.headers
+                    ),
+                    attempts = attempts.toList()
                 )
             }
         }
 
-        val challenge = firstChallenge
+        return terminalResult(attempts)
+    }
+
+    private suspend fun runAttempt(
+        kind: PlaybackResolverKind,
+        resolver: suspend () -> ResolvedAudioCandidate?
+    ): ResolverOutcome = try {
+        val candidate = resolver()
+        val normalizedUrl = candidate
+            ?.url
+            ?.trim()
+            ?.takeIf {
+                it.startsWith(
+                    "https://",
+                    ignoreCase = true
+                ) || it.startsWith(
+                    "http://",
+                    ignoreCase = true
+                )
+            }
+
+        ResolverOutcome(
+            candidate = candidate,
+            normalizedUrl = normalizedUrl,
+            attempt = PlaybackResolverAttempt(
+                resolver = kind,
+                errorMessage = if (normalizedUrl == null) {
+                    "No playable audio URL returned."
+                } else {
+                    null
+                }
+            )
+        )
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Throwable) {
+        val challenge = YouTubeChallengeHandler
+            .classify(error)
+
+        ResolverOutcome(
+            candidate = null,
+            normalizedUrl = null,
+            attempt = PlaybackResolverAttempt(
+                resolver = kind,
+                errorMessage = error.message
+                    ?.take(180),
+                challenge = challenge
+            )
+        )
+    }
+
+    private fun terminalResult(
+        attempts: List<PlaybackResolverAttempt>
+    ): PlaybackResolutionResult {
+        val challenge = attempts
+            .firstNotNullOfOrNull { attempt ->
+                attempt.challenge
+            }
 
         if (challenge != null) {
             return PlaybackResolutionResult
                 .VerificationRequired(
                     challenge = challenge,
-                    attempts = attempts.toList()
+                    attempts = attempts
                 )
         }
 
@@ -123,7 +237,13 @@ class PlaybackResolverChain(
                         ?.takeIf(String::isNotBlank)
                 }
                 ?: "No resolver returned a playable audio stream.",
-            attempts = attempts.toList()
+            attempts = attempts
         )
     }
+
+    private data class ResolverOutcome(
+        val candidate: ResolvedAudioCandidate?,
+        val normalizedUrl: String?,
+        val attempt: PlaybackResolverAttempt
+    )
 }
