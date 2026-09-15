@@ -50,4 +50,29 @@ class PlaybackResolverChainTest {
         )
         assertTrue(!primaryRelease.isCompleted)
     }
+
+    @Test
+    fun stopsWaitingForHungPrimaryAfterLocalBudget() = runBlocking {
+        val primaryRelease = CompletableDeferred<Unit>()
+
+        val result = withTimeout(1_000L) {
+            PlaybackResolverChain(
+                resolvers = listOf(
+                    PlaybackResolverKind.YtDlp to suspend {
+                        primaryRelease.await()
+                        null
+                    },
+                    PlaybackResolverKind.InnerTube to suspend { null },
+                    PlaybackResolverKind.NewPipe to suspend { null }
+                ),
+                hedgePolicy = PlaybackResolverHedgePolicy(
+                    ytDlpHeadStartMs = 25L,
+                    localBudgetMs = 150L
+                )
+            ).resolve()
+        }
+
+        assertTrue(result is PlaybackResolutionResult.Failed)
+        assertTrue(!primaryRelease.isCompleted)
+    }
 }
