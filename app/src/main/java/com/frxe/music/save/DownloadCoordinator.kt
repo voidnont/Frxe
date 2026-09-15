@@ -1,7 +1,6 @@
 package com.frxe.music.save
 
 import android.content.Context
-import com.frxe.music.source.DownloadedTrackRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -14,7 +13,6 @@ class DownloadCoordinator(
 
     init {
         DownloadQueueStore.initialize(appContext)
-        DownloadedTrackRegistry.initialize(appContext)
     }
 
     suspend fun save(
@@ -62,28 +60,19 @@ class DownloadCoordinator(
             }
 
         return when (terminal.state) {
-            DownloadQueueItemState.Complete -> {
-                val result = SaveResult(
-                    uri = terminal.savedUri
-                        ?: throw IllegalStateException(
-                            "Download completed without a saved URI."
-                        ),
-                    title = terminal.savedTitle
-                        ?.takeIf(String::isNotBlank)
-                        ?: terminal.title,
-                    artist = terminal.artist,
-                    format = runCatching {
-                        SaveFormat.valueOf(terminal.format)
-                    }.getOrDefault(SaveFormat.MP3)
-                )
-
-                DownloadedTrackRegistry.register(
-                    sourceUrl = request.sourceUrl,
-                    localUri = result.uri
-                )
-
-                result
-            }
+            DownloadQueueItemState.Complete -> SaveResult(
+                uri = terminal.savedUri
+                    ?: throw IllegalStateException(
+                        "Download completed without a saved URI."
+                    ),
+                title = terminal.savedTitle
+                    ?.takeIf(String::isNotBlank)
+                    ?: terminal.title,
+                artist = terminal.artist,
+                format = runCatching {
+                    SaveFormat.valueOf(terminal.format)
+                }.getOrDefault(SaveFormat.MP3)
+            )
 
             DownloadQueueItemState.Cancelled ->
                 throw CancellationException("Download cancelled")
