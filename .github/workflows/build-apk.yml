@@ -40,12 +40,8 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
-      - name: Discover Android test tasks
-        run: |
-          gradle --no-daemon :app:tasks --all | tee /tmp/frxe-tasks.txt
-          echo "--- candidate test tasks ---"
-          grep -Ei '(^|[[:space:]])(test|.*HostTest|.*UnitTest)[A-Za-z0-9_-]*([[:space:]]|$)' /tmp/frxe-tasks.txt || true
-          exit 1
+      - name: Run unit tests
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
 
       - name: Build installable release APK
         env:
