@@ -14,6 +14,7 @@ fun Modifier.playerGestures(
     enabled: Boolean,
     isTv: Boolean,
     blocked: Boolean,
+    canCollapse: Boolean,
     onAction: (PlayerGestureAction) -> Unit
 ): Modifier {
     val density = LocalDensity.current
@@ -22,7 +23,13 @@ fun Modifier.playerGestures(
         return this
     }
 
-    return pointerInput(enabled, isTv, blocked, density) {
+    return pointerInput(
+        enabled,
+        isTv,
+        blocked,
+        canCollapse,
+        density
+    ) {
         awaitEachGesture {
             val down = awaitFirstDown(
                 requireUnconsumed = false,
@@ -30,7 +37,7 @@ fun Modifier.playerGestures(
             )
             var totalX = 0f
             var totalY = 0f
-            var cancelled = false
+            var childConsumed = false
             var pressed = true
 
             while (pressed) {
@@ -38,10 +45,7 @@ fun Modifier.playerGestures(
                 val change = event.changes.firstOrNull { it.id == down.id }
                     ?: break
 
-                if (change.isConsumed) {
-                    cancelled = true
-                    break
-                }
+                childConsumed = childConsumed || change.isConsumed
 
                 val delta = change.positionChange()
                 totalX += delta.x
@@ -49,18 +53,18 @@ fun Modifier.playerGestures(
                 pressed = change.pressed
             }
 
-            if (!cancelled) {
-                val action = PlayerGesturePolicy.action(
-                    deltaXDp = with(density) { totalX.toDp().value },
-                    deltaYDp = with(density) { totalY.toDp().value },
-                    enabled = enabled,
-                    isTv = isTv,
-                    blocked = blocked
-                )
+            val action = PlayerGesturePolicy.action(
+                deltaXDp = with(density) { totalX.toDp().value },
+                deltaYDp = with(density) { totalY.toDp().value },
+                enabled = enabled,
+                isTv = isTv,
+                blocked = blocked,
+                childConsumed = childConsumed,
+                canCollapse = canCollapse
+            )
 
-                if (action != PlayerGestureAction.None) {
-                    onAction(action)
-                }
+            if (action != PlayerGestureAction.None) {
+                onAction(action)
             }
         }
     }
