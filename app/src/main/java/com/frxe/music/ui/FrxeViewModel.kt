@@ -33,6 +33,7 @@ import com.frxe.music.playback.AudioOnlyPlaybackPolicy
 import com.frxe.music.playback.FrxePlaybackService
 import com.frxe.music.playback.PlaybackLaunchPolicy
 import com.frxe.music.playback.PlaybackQueueStore
+import com.frxe.music.recommendation.HomeRefreshPolicy
 import com.frxe.music.recommendation.RecommendationRepository
 import com.frxe.music.save.DownloadCoordinator
 import com.frxe.music.save.DownloadRoutePolicy
@@ -259,6 +260,9 @@ class FrxeViewModel(application: Application) : AndroidViewModel(application) {
     private var searchJob:
         Job? = null
 
+    private var lastRemoteHomeKey:
+        String? = null
+
     private var lyricsJob:
         Job? = null
 
@@ -420,6 +424,24 @@ class FrxeViewModel(application: Application) : AndroidViewModel(application) {
                     }
 
                     delay(CatalogLoadPolicy.homeRemoteDelayMs)
+
+                    val remoteHomeKey =
+                        HomeRefreshPolicy.key(
+                            history = recent,
+                            library = saved,
+                            likedIds = likes
+                        )
+
+                    if (
+                        !HomeRefreshPolicy.shouldRefresh(
+                            previousKey = lastRemoteHomeKey,
+                            nextKey = remoteHomeKey
+                        )
+                    ) {
+                        return@collectLatest
+                    }
+
+                    lastRemoteHomeKey = remoteHomeKey
 
                     val recommendations =
                         recommendationRepository
