@@ -29,6 +29,16 @@ class PlaybackStreamResolver {
     ): Track? {
         PlaybackResolutionMonitor.resolving(track.id)
 
+        DownloadedTrackRegistry
+            .localTrackFor(track)
+            ?.let { localTrack ->
+                PlaybackResolutionMonitor.resolved(
+                    trackId = track.id,
+                    resolver = null
+                )
+                return localTrack
+            }
+
         if (AudioOnlyPlaybackPolicy.isPlayable(track.streamUrl)) {
             PlaybackResolutionMonitor.resolved(
                 trackId = track.id,
