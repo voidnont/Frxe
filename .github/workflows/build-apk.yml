@@ -46,12 +46,12 @@ jobs:
         run: gradle --no-daemon --stacktrace clean :app:assembleRelease
 
       - name: Prepare APK
-        run: cp app/build/outputs/apk/release/app-release.apk Frxe-0.6.8-android.apk
+        run: cp app/build/outputs/apk/release/app-release.apk Frxe-0.6.9-android.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: FRXE-0.6.8-APK
-          path: Frxe-0.6.8-android.apk
+          name: FRXE-0.6.9-APK
+          path: Frxe-0.6.9-android.apk
           if-no-files-found: error
           retention-days: 30
