@@ -1,0 +1,121 @@
+name: Apply Island overlay patch
+
+on:
+  push:
+    branches:
+      - fix/island-speed-067
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/island-speed-067
+          fetch-depth: 0
+      - name: Patch Island overlay
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('app/src/main/java/com/frxe/music/island/IslandHubOverlayController.kt')
+          text = path.read_text()
+
+          def replace_once(old, new, label):
+              global text
+              if old not in text:
+                  raise SystemExit(f'missing {label}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              'import android.graphics.Canvas\nimport android.graphics.Color\n',
+              'import android.graphics.Bitmap\nimport android.graphics.BitmapFactory\nimport android.graphics.Canvas\nimport android.graphics.Color\n',
+              'bitmap imports'
+          )
+          replace_once(
+              'import android.view.animation.DecelerateInterpolator\n',
+              'import android.view.animation.DecelerateInterpolator\nimport android.view.animation.LinearInterpolator\n',
+              'linear interpolator import'
+          )
+          replace_once(
+              'import android.widget.ImageButton\n',
+              'import android.widget.ImageButton\nimport android.widget.ImageView\n',
+              'ImageView import'
+          )
+          replace_once(
+              'import com.frxe.music.MainActivity\n',
+              'import com.frxe.music.MainActivity\nimport java.net.URL\nimport java.util.concurrent.ConcurrentHashMap\n',
+              'network imports'
+          )
+
+          replace_once(
+              '    private var artworkDot: View? = null\n    private var waveView: IslandWaveView? = null\n',
+              '    private var artworkView: ImageView? = null\n    private var largeArtworkView: ImageView? = null\n    private var currentArtworkBitmap: Bitmap? = null\n    private var loadedArtworkUrl: String? = null\n    private var artworkLoadingUrl: String? = null\n    private var artworkLoadToken: Long = 0L\n    private var waveView: IslandWaveView? = null\n',
+              'artwork fields'
+          )
+
+          old_refresh = '''        val hasTrack = currentMediaId != null\n        if (\n            FrxeAppVisibility.isForeground ||\n            !state.floatingEnabled ||\n            !state.overlayPermissionGranted ||\n            !hasTrack ||\n            dismissedMediaId == currentMediaId\n        ) {\n            dismiss()\n            return\n        }'''
+          new_refresh = '''        val hasTrack = currentMediaId != null\n        val dismissed = dismissedMediaId == currentMediaId\n        if (\n            !IslandPresentationPolicy.showFloating(\n                isForeground = FrxeAppVisibility.isForeground,\n                floatingEnabled = state.floatingEnabled,\n                overlayPermissionGranted = state.overlayPermissionGranted,\n                hasTrack = hasTrack,\n                dismissed = dismissed\n            )\n        ) {\n            dismiss()\n            return\n        }'''
+          replace_once(old_refresh, new_refresh, 'floating presentation condition')
+
+          replace_once(
+              '        artworkDot = null\n        waveView = null\n',
+              '        artworkView = null\n        largeArtworkView = null\n        waveView = null\n',
+              'dismiss artwork refs'
+          )
+
+          old_compact_art = '''        artworkDot = View(context).apply {\n            background = dotDrawable(Color.WHITE)\n        }\n        left.addView(\n            artworkDot,\n            FrameLayout.LayoutParams(\n                dp(27),\n                dp(27),\n                Gravity.CENTER\n            )\n        )'''
+          new_compact_art = '''        artworkView = ImageView(context).apply {\n            scaleType = ImageView.ScaleType.CENTER_CROP\n            background = roundedArtworkDrawable(\n                Color.rgb(72, 72, 72),\n                radiusDp = 8\n            )\n            clipToOutline = true\n        }\n        left.addView(\n            artworkView,\n            FrameLayout.LayoutParams(\n                dp(27),\n                dp(27),\n                Gravity.CENTER\n            )\n        )'''
+          replace_once(old_compact_art, new_compact_art, 'compact artwork')
+
+          replace_once(
+              '            titleView = null\n            artistView = null\n            progressView = null\n',
+              '            titleView = null\n            artistView = null\n            largeArtworkView = null\n            progressView = null\n',
+              'collapsed large artwork reset'
+          )
+
+          old_large_art = '''        val largeArtwork = View(context).apply {\n            background = artworkDot?.background?.constantState\n                ?.newDrawable()\n                ?: dotDrawable(Color.WHITE)\n        }\n        details.addView(\n            largeArtwork,\n            LinearLayout.LayoutParams(\n                dp(48),\n                dp(48)\n            ).apply {\n                marginEnd = dp(11)\n            }\n        )'''
+          new_large_art = '''        largeArtworkView = ImageView(context).apply {\n            scaleType = ImageView.ScaleType.CENTER_CROP\n            background = roundedArtworkDrawable(\n                Color.rgb(72, 72, 72),\n                radiusDp = 14\n            )\n            clipToOutline = true\n            currentArtworkBitmap?.let(::setImageBitmap)\n        }\n        details.addView(\n            largeArtworkView,\n            LinearLayout.LayoutParams(\n                dp(48),\n                dp(48)\n            ).apply {\n                marginEnd = dp(11)\n            }\n        )'''
+          replace_once(old_large_art, new_large_art, 'expanded artwork')
+
+          old_update = '''        val seed = item.mediaId.hashCode().absoluteValue\n        val r = 72 + seed % 118\n        val g = 72 + (seed / 7) % 118\n        val b = 72 + (seed / 13) % 118\n        artworkDot?.background =\n            dotDrawable(Color.rgb(r, g, b))'''
+          new_update = '''        val seed = item.mediaId.hashCode().absoluteValue\n        val r = 72 + seed % 118\n        val g = 72 + (seed / 7) % 118\n        val b = 72 + (seed / 13) % 118\n        updateArtwork(\n            rawUrl = item.mediaMetadata.artworkUri?.toString(),\n            fallbackColor = Color.rgb(r, g, b)\n        )'''
+          replace_once(old_update, new_update, 'updateContent artwork')
+
+          replace_once(
+              '        waveView?.invalidate()\n    }\n\n    private fun resizeWindow(',
+              '        waveView?.setPlaying(player.isPlaying)\n    }\n\n    private fun updateArtwork(\n        rawUrl: String?,\n        fallbackColor: Int\n    ) {\n        val normalized = IslandArtworkPolicy.normalize(rawUrl)\n\n        artworkView?.background = roundedArtworkDrawable(\n            fallbackColor,\n            radiusDp = 8\n        )\n        largeArtworkView?.background = roundedArtworkDrawable(\n            fallbackColor,\n            radiusDp = 14\n        )\n\n        if (normalized == null) {\n            artworkLoadToken += 1L\n            loadedArtworkUrl = null\n            artworkLoadingUrl = null\n            currentArtworkBitmap = null\n            artworkView?.setImageDrawable(null)\n            largeArtworkView?.setImageDrawable(null)\n            return\n        }\n\n        if (loadedArtworkUrl == normalized && currentArtworkBitmap != null) {\n            applyCurrentArtwork()\n            return\n        }\n\n        ARTWORK_CACHE[normalized]?.let { cached ->\n            loadedArtworkUrl = normalized\n            artworkLoadingUrl = null\n            currentArtworkBitmap = cached\n            applyCurrentArtwork()\n            return\n        }\n\n        if (artworkLoadingUrl == normalized) {\n            return\n        }\n\n        artworkLoadingUrl = normalized\n        loadedArtworkUrl = normalized\n        currentArtworkBitmap = null\n        artworkView?.setImageDrawable(null)\n        largeArtworkView?.setImageDrawable(null)\n        val token = ++artworkLoadToken\n\n        Thread {\n            val bitmap = runCatching {\n                val connection = URL(normalized).openConnection().apply {\n                    connectTimeout = 4_000\n                    readTimeout = 6_000\n                    setRequestProperty(\n                        "User-Agent",\n                        "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/152 Mobile Safari/537.36"\n                    )\n                    setRequestProperty(\n                        "Accept",\n                        "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"\n                    )\n                }\n                connection.getInputStream().use(BitmapFactory::decodeStream)\n            }.getOrNull()\n\n            mainHandler.post {\n                if (\n                    token != artworkLoadToken ||\n                    loadedArtworkUrl != normalized\n                ) {\n                    return@post\n                }\n\n                artworkLoadingUrl = null\n                if (bitmap != null) {\n                    ARTWORK_CACHE[normalized] = bitmap\n                    currentArtworkBitmap = bitmap\n                    applyCurrentArtwork()\n                }\n            }\n        }.start()\n    }\n\n    private fun applyCurrentArtwork() {\n        val bitmap = currentArtworkBitmap ?: return\n        artworkView?.setImageBitmap(bitmap)\n        largeArtworkView?.setImageBitmap(bitmap)\n    }\n\n    private fun resizeWindow(',
+              'artwork loader insertion'
+          )
+
+          replace_once(
+              '    private fun dotDrawable(\n        color: Int\n    ) = GradientDrawable().apply {\n        shape = GradientDrawable.OVAL\n        setColor(color)\n        setStroke(\n            dp(1),\n            Color.argb(105, 255, 255, 255)\n        )\n    }\n\n',
+              '    private fun roundedArtworkDrawable(\n        color: Int,\n        radiusDp: Int\n    ) = GradientDrawable().apply {\n        shape = GradientDrawable.RECTANGLE\n        setColor(color)\n        cornerRadius = dp(radiusDp).toFloat()\n        setStroke(\n            dp(1),\n            Color.argb(90, 255, 255, 255)\n        )\n    }\n\n',
+              'rounded artwork drawable'
+          )
+
+          wave_start = text.index('    private inner class IslandWaveView(')
+          companion_start = text.index('    companion object {', wave_start)
+          wave_replacement = '''    private inner class IslandWaveView(\n        context: Context\n    ) : View(context) {\n        private val paint = Paint(\n            Paint.ANTI_ALIAS_FLAG\n        ).apply {\n            color = Color.WHITE\n        }\n\n        private var phase = 0f\n        private var playing = false\n\n        private val animator = ValueAnimator.ofFloat(0f, 1f).apply {\n            duration = 900L\n            repeatCount = ValueAnimator.INFINITE\n            interpolator = LinearInterpolator()\n            addUpdateListener { valueAnimator ->\n                phase = valueAnimator.animatedValue as Float\n                invalidate()\n            }\n        }\n\n        fun setPlaying(value: Boolean) {\n            if (playing == value) return\n            playing = value\n\n            if (playing) {\n                animator.start()\n            } else {\n                animator.cancel()\n                phase = 0f\n                invalidate()\n            }\n        }\n\n        override fun onDetachedFromWindow() {\n            animator.cancel()\n            super.onDetachedFromWindow()\n        }\n\n        override fun onDraw(canvas: Canvas) {\n            super.onDraw(canvas)\n\n            val barWidth = width / 9f\n            val gap = barWidth\n            val levels = IslandWaveformPolicy.levels(\n                phase = phase,\n                isPlaying = playing\n            )\n\n            levels.forEachIndexed { index, activity ->\n                val minHeight = height * 0.18f\n                val barHeight =\n                    minHeight +\n                        (height * 0.76f * activity)\n                val left = gap + index * (barWidth + gap)\n                val top = (height - barHeight) / 2f\n                val radius = barWidth / 2f\n                paint.alpha = if (playing) 225 else 125\n\n                canvas.drawRoundRect(\n                    left,\n                    top,\n                    left + barWidth,\n                    top + barHeight,\n                    radius,\n                    radius,\n                    paint\n                )\n            }\n        }\n    }\n\n'''
+          text = text[:wave_start] + wave_replacement + text[companion_start:]
+
+          replace_once(
+              '    companion object {\n        private const val COLLAPSED_WIDTH_DP = 174\n',
+              '    companion object {\n        private val ARTWORK_CACHE = ConcurrentHashMap<String, Bitmap>()\n\n        private const val COLLAPSED_WIDTH_DP = 174\n',
+              'artwork cache'
+          )
+
+          path.write_text(text)
+          PY
+      - name: Remove temporary patch workflow
+        run: rm .github/workflows/apply-island-overlay-patch.yml
+      - name: Commit patch
+        run: |
+          git config user.name "void"
+          git config user.email "voidnont@proton.me"
+          git add -A
+          git commit -m "fix: show real artwork and smooth Island animation"
+          git push origin HEAD:fix/island-speed-067
