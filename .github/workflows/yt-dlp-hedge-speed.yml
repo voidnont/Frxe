@@ -1,0 +1,141 @@
+name: FRXE yt-dlp hedge Android speed probe
+
+on:
+  push:
+    branches:
+      - fix/yt-dlp-hedged-fallback-067
+
+jobs:
+  android-speed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+      - name: Prepare Android speed test
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/build.gradle.kts')
+          text = p.read_text()
+          text = text.replace('        targetSdk = 37\n', '        targetSdk = 37\n        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"\n', 1)
+          text = text.replace('    testImplementation("junit:junit:4.13.2")\n', '    testImplementation("junit:junit:4.13.2")\n    androidTestImplementation("androidx.test.ext:junit:1.2.1")\n    androidTestImplementation("androidx.test:runner:1.6.2")\n', 1)
+          p.write_text(text)
+          PY
+          mkdir -p app/src/androidTest/java/com/frxe/music/perf
+          cat > app/src/androidTest/java/com/frxe/music/perf/FrxeAndroidSpeedProbeTest.kt <<'KOT'
+          package com.frxe.music.perf
+
+          import android.app.Application
+          import android.util.Log
+          import androidx.test.ext.junit.runners.AndroidJUnit4
+          import androidx.test.platform.app.InstrumentationRegistry
+          import com.frxe.music.model.Track
+          import com.frxe.music.playback.PlaybackPrefetchCache
+          import com.frxe.music.playback.PlaybackQueueStore
+          import com.frxe.music.source.PlaybackStreamResolver
+          import com.frxe.music.source.YouTubeCatalogSource
+          import kotlinx.coroutines.delay
+          import kotlinx.coroutines.runBlocking
+          import org.junit.Assert.assertEquals
+          import org.junit.Assert.assertTrue
+          import org.junit.Test
+          import org.junit.runner.RunWith
+          import kotlin.system.measureTimeMillis
+
+          @RunWith(AndroidJUnit4::class)
+          class FrxeAndroidSpeedProbeTest {
+              @Test
+              fun measureRealSearchResolveAndQueueHandoff() {
+                  runBlocking {
+                      val app = InstrumentationRegistry.getInstrumentation()
+                          .targetContext.applicationContext as Application
+                      val source = YouTubeCatalogSource(app)
+
+                      var coldResults: List<Track> = emptyList()
+                      val coldSearchMs = measureTimeMillis {
+                          coldResults = source.search("Daft Punk")
+                      }
+                      Log.i(TAG, "search_cold_ms=$coldSearchMs results=${coldResults.size}")
+
+                      var warmResults: List<Track> = emptyList()
+                      val warmSearchMs = measureTimeMillis {
+                          warmResults = source.search("Daft Punk")
+                      }
+                      Log.i(TAG, "search_warm_ms=$warmSearchMs results=${warmResults.size}")
+
+                      if (coldResults.isNotEmpty()) {
+                          assertEquals(coldResults.map(Track::id), warmResults.map(Track::id))
+                          assertTrue("cached search took ${warmSearchMs}ms", warmSearchMs < 250L)
+
+                          val resolver = PlaybackStreamResolver()
+                          var resolvedFirst: Track? = null
+                          val firstResolveMs = measureTimeMillis {
+                              resolvedFirst = resolver.resolve(coldResults.first())
+                          }
+                          Log.i(TAG, "first_track_resolve_ms=$firstResolveMs success=${resolvedFirst != null}")
+
+                          if (coldResults.size >= 2) {
+                              PlaybackPrefetchCache.clear()
+                              PlaybackQueueStore.replace(
+                                  tracks = coldResults.take(3),
+                                  currentTrackId = coldResults.first().id
+                              )
+
+                              val next = coldResults[1]
+                              var waitedMs = 0L
+                              while (
+                                  PlaybackPrefetchCache.forTrack(next) == null &&
+                                  waitedMs < 15_000L
+                              ) {
+                                  delay(100L)
+                                  waitedMs += 100L
+                              }
+
+                              val prefetched = PlaybackPrefetchCache.forTrack(next) != null
+                              var resolvedNext: Track? = null
+                              val handoffResolveMs = measureTimeMillis {
+                                  resolvedNext = resolver.resolve(next)
+                              }
+                              Log.i(
+                                  TAG,
+                                  "next_prefetch_ready=$prefetched prefetch_wait_ms=$waitedMs " +
+                                      "handoff_resolve_ms=$handoffResolveMs success=${resolvedNext != null}"
+                              )
+                          }
+                      }
+                  }
+              }
+
+              private companion object {
+                  const val TAG = "FRXE_SPEED"
+              }
+          }
+          KOT
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run Android speed probe
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: adb logcat -c; gradle --no-daemon :app:connectedDebugAndroidTest; STATUS=$?; echo '=== FRXE speed metrics ==='; adb logcat -d -s FRXE_SPEED:I '*:S' | tee frxe-speed.log; exit $STATUS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frxe-yt-dlp-hedge-speed
+          path: |
+            frxe-speed.log
+            app/build/reports/androidTests/connected/
+          if-no-files-found: warn
