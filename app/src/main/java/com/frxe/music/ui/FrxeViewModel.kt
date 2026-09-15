@@ -31,6 +31,8 @@ import com.frxe.music.model.PlayerUiState
 import com.frxe.music.model.Track
 import com.frxe.music.playback.AudioOnlyPlaybackPolicy
 import com.frxe.music.playback.FrxePlaybackService
+import com.frxe.music.playback.PlaybackLaunchPolicy
+import com.frxe.music.playback.PlaybackQueueStore
 import com.frxe.music.recommendation.RecommendationRepository
 import com.frxe.music.save.DownloadCoordinator
 import com.frxe.music.save.DownloadRoutePolicy
@@ -47,7 +49,7 @@ import com.frxe.music.social.PlaybackClockSynchronizer
 import com.frxe.music.social.SharedPlaybackState
 import com.frxe.music.social.SyncAction
 import com.frxe.music.social.decideSyncAction
-import com.frxe.music.source.PlaybackStreamResolver
+import com.frxe.music.source.CatalogLoadPolicy
 import com.frxe.music.source.YouTubeCatalogSource
 import com.frxe.music.updates.DependencyReleaseRepository
 import com.frxe.music.updates.FrxeUpdateRepository
@@ -76,9 +78,6 @@ class FrxeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val recommendationRepository =
         RecommendationRepository(source::search)
-
-    private val playbackResolver =
-        PlaybackStreamResolver()
 
     private val lyricsRepository =
         LyricsRepository()
@@ -316,7 +315,8 @@ class FrxeViewModel(application: Application) : AndroidViewModel(application) {
                 if (
                     playbackState ==
                     Player.STATE_ENDED &&
-                    autoDjEnabled
+                    autoDjEnabled &&
+                    !PlaybackQueueStore.hasManualNext()
                 ) {
                     playAutoDjNext()
                 } else {
@@ -419,7 +419,7 @@ class FrxeViewModel(application: Application) : AndroidViewModel(application) {
                             }
                     }
 
-                    delay(450)
+                    delay(CatalogLoadPolicy.homeRemoteDelayMs)
 
                     val recommendations =
                         recommendationRepository
@@ -481,7 +481,7 @@ class FrxeViewModel(application: Application) : AndroidViewModel(application) {
                 if (
                     query.isNotBlank()
                 ) {
-                    delay(350)
+                    delay(CatalogLoadPolicy.searchDebounceMs)
                 }
 
                 _searchResults.value =
@@ -512,94 +512,24 @@ class FrxeViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun play(
         track: Track,
-        queue: List<Track> =
-            emptyList()
+        queue: List<Track> = emptyList()
     ) {
+        val plan = PlaybackLaunchPolicy.plan(
+            selected = track,
+            requestedQueue = queue
+        )
 
-        /*
-         * Keep the original catalog
-         * tracks in Frxe's state.
-         *
-         * We DO NOT permanently replace
-         * their URLs with expiring
-         * googlevideo/audio URLs.
-         */
-        val originalQueue =
-            if (
-                queue.isEmpty()
-            ) {
-                listOf(track)
-            } else {
-                queue
-            }
-
-        originalQueue.forEach {
-
-            tracksById[
-                it.id
-            ] = it
+        plan.tracks.forEach { queuedTrack ->
+            tracksById[queuedTrack.id] = queuedTrack
         }
 
-        viewModelScope.launch {
+        PlaybackQueueStore.replaceAndRequestPlay(
+            tracks = plan.tracks,
+            currentTrackId = plan.currentTrackId
+        )
 
-            /*
-             * Resolve the selected track
-             * first.
-             *
-             * This is the important part
-             * that was missing in 0.5.0.
-             */
-            val resolvedTrack =
-                playbackResolver.resolve(
-                    track
-                )
-                    ?: return@launch
-
-            val player =
-                controller
-                    ?: return@launch
-
-            /*
-             * Start selected track
-             * immediately instead of
-             * resolving 20-30 search
-             * results before playback.
-             */
-            player.setMediaItem(
-                resolvedTrack
-                    .toMediaItem()
-            )
-
-            player.prepare()
-
-            player.play()
-
-            loadLyrics(
-                track
-            )
-
-            /*
-             * Store ORIGINAL catalog track
-             * in history.
-             *
-             * Do not save the temporary
-             * direct audio URL because it
-             * can expire.
-             */
-            viewModelScope.launch(
-                Dispatchers.IO
-            ) {
-
-                dao.addHistory(
-                    PlaybackHistoryEntity
-                        .from(
-                            track
-                        )
-                )
-            }
-
-            refreshNowPlaying()
-        }
+        loadLyrics(track)
+        refreshNowPlaying()
     }
 
     fun togglePlayPause() {
@@ -618,13 +548,13 @@ class FrxeViewModel(application: Application) : AndroidViewModel(application) {
         refreshNowPlaying()
     }
 
-    fun next() =
-        controller
-            ?.seekToNextMediaItem()
+    fun next() {
+        queueNext()
+    }
 
-    fun previous() =
-        controller
-            ?.seekToPreviousMediaItem()
+    fun previous() {
+        queuePrevious()
+    }
 
     fun seek(
         positionMs: Long
@@ -2079,32 +2009,7 @@ class FrxeViewModel(application: Application) : AndroidViewModel(application) {
                     player.bufferedPercentage,
 
                 queue =
-                    (
-                        0 until
-                        player.mediaItemCount
-                    )
-                        .mapNotNull {
-                                index ->
-
-                            val item =
-                                player
-                                    .getMediaItemAt(
-                                        index
-                                    )
-
-                            tracksById[
-                                item.mediaId
-                            ]
-                                ?: item
-                                    .toTrackFromSession()
-                                    ?.also {
-                                            restored ->
-
-                                        tracksById[
-                                            restored.id
-                                        ] = restored
-                                    }
-                        },
+                    PlaybackQueueStore.tracks(),
 
                 volume =
                     player.volume,

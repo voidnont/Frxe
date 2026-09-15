@@ -196,7 +196,7 @@ fun SettingsScreen(
                                     .onSurface
                         )
                         Text(
-                            "Top-center playback controls inside Frxe and, optionally, over other Android apps.",
+                            "Top-center playback controls over other Android apps while FRXE is in the background.",
                             color =
                                 MaterialTheme
                                     .colorScheme
@@ -223,7 +223,7 @@ fun SettingsScreen(
                                     .onSurface
                         )
                         Text(
-                            "Top-center mini player while browsing Frxe",
+                            "Disabled so the Island never covers FRXE itself",
                             color =
                                 MaterialTheme
                                     .colorScheme
