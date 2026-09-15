@@ -17,5 +17,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
-      - name: Run speed tests
-        run: gradle --no-daemon :app:testDebugUnitTest --tests '*CatalogSearchCacheTest' --tests '*CatalogHedgeRunnerTest' --tests '*PlaybackPrefetchWindowPolicyTest' --tests '*PlaybackPrefetchCacheMultiTest' --tests '*HomeRefreshPolicyTest'
+      - name: Run full debug verification
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Package fast APK
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk FRXE-0.6.7-fast.apk
+          sha256sum FRXE-0.6.7-fast.apk | tee FRXE-0.6.7-fast.apk.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FRXE-0.6.7-fast-APK
+          path: |
+            FRXE-0.6.7-fast.apk
+            FRXE-0.6.7-fast.apk.sha256
+          if-no-files-found: error
