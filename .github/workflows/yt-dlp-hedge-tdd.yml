@@ -1,4 +1,4 @@
-name: FRXE yt-dlp hedge TDD
+name: FRXE yt-dlp hedge verification
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
       - fix/yt-dlp-hedged-fallback-067
 
 jobs:
-  test:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,5 +17,5 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
-      - name: Run resolver hedge regression test
-        run: gradle --no-daemon :app:testDebugUnitTest --tests com.frxe.music.source.PlaybackResolverChainTest
+      - name: Run full tests and debug build
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
