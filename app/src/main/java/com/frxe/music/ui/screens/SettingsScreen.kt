@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import com.frxe.music.BuildConfig
 import com.frxe.music.ui.FrxeViewModel
 import com.frxe.music.ui.components.GlassPanel
+import com.frxe.music.ui.gestures.PlayerGesturePreferences
 import com.frxe.music.updates.DependencyUpdateMode
 import com.frxe.music.updates.FrxeSupportLinks
 import com.frxe.music.updates.RuntimeHealthStore
@@ -81,6 +82,13 @@ fun SettingsScreen(
     var updatingRuntime by
         remember {
             mutableStateOf(false)
+        }
+
+    var playerGesturesEnabled by
+        remember(context) {
+            mutableStateOf(
+                PlayerGesturePreferences.enabled(context)
+            )
         }
 
     val overlayPermissionLauncher =
@@ -332,6 +340,64 @@ fun SettingsScreen(
                         )
                     }
                 }
+            }
+        }
+
+        GlassPanel(
+            Modifier.fillMaxWidth(),
+            radius = 28.dp,
+            strong = true
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment =
+                    Alignment.CenterVertically,
+                horizontalArrangement =
+                    Arrangement.spacedBy(12.dp)
+            ) {
+                Column(
+                    Modifier.weight(1f),
+                    verticalArrangement =
+                        Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        "Player gestures",
+                        fontWeight =
+                            FontWeight.Bold,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurface
+                    )
+                    Text(
+                        if (isTv) {
+                            "Touch gestures are disabled on Android TV."
+                        } else {
+                            "Swipe left/right for next/previous and swipe down to close the full player."
+                        },
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant
+                    )
+                }
+
+                Switch(
+                    checked =
+                        playerGesturesEnabled,
+                    enabled =
+                        !isTv,
+                    onCheckedChange =
+                        { enabled ->
+                            playerGesturesEnabled =
+                                enabled
+                            PlayerGesturePreferences
+                                .setEnabled(
+                                    context,
+                                    enabled
+                                )
+                        }
+                )
             }
         }
 
