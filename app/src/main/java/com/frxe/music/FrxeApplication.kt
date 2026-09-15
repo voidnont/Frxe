@@ -5,6 +5,7 @@ import com.frxe.music.downloads.DownloadSupport
 import com.frxe.music.playback.PlaybackPrefetcher
 import com.frxe.music.playback.PlaybackQueueStore
 import com.frxe.music.save.DownloadQueueStore
+import com.frxe.music.source.DownloadedTrackRegistry
 import com.frxe.music.source.FrxeNewPipeRuntime
 import com.frxe.music.source.ResolverDiagnosticsStore
 import com.frxe.music.updates.RuntimeHealthStore
@@ -16,6 +17,7 @@ class FrxeApplication : Application() {
 
         FrxeNewPipeRuntime.initialize()
         ResolverDiagnosticsStore.initialize(this)
+        DownloadedTrackRegistry.initialize(this)
         RuntimeHealthStore.initialize(this)
         YtDlpRuntimeUpdater.initializeAndSchedule(this)
 
