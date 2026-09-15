@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
@@ -62,7 +63,7 @@ object DownloadSupport {
     ): CacheDataSource.Factory {
         initialize(context)
 
-        val resolvingUpstream = ResolvingDataSource.Factory(
+        val resolvingHttp = ResolvingDataSource.Factory(
             upstream
         ) { dataSpec ->
             val requestHeaders =
@@ -77,9 +78,17 @@ object DownloadSupport {
             }
         }
 
+        val multiSchemeUpstream =
+            DefaultDataSource.Factory(
+                appContext,
+                resolvingHttp
+            )
+
         return CacheDataSource.Factory()
             .setCache(streamCache)
-            .setUpstreamDataSourceFactory(resolvingUpstream)
+            .setUpstreamDataSourceFactory(
+                multiSchemeUpstream
+            )
             .setFlags(
                 CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR
             )
