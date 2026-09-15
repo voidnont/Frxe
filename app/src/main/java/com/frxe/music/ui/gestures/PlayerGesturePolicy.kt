@@ -12,6 +12,7 @@ enum class PlayerGestureAction {
 object PlayerGesturePolicy {
     private const val HORIZONTAL_THRESHOLD_DP = 72f
     private const val VERTICAL_THRESHOLD_DP = 88f
+    // Require a clear primary direction so diagonal scrolling is not treated as navigation.
     private const val DIRECTION_DOMINANCE = 1.15f
 
     fun action(
