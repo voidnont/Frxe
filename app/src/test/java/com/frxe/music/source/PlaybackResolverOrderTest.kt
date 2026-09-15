@@ -5,12 +5,12 @@ import org.junit.Test
 
 class PlaybackResolverOrderTest {
     @Test
-    fun youtubeMusicIsPrimaryResolver() {
+    fun ytDlpIsPrimaryPlaybackResolver() {
         assertEquals(
             listOf(
+                PlaybackResolverKind.YtDlp,
                 PlaybackResolverKind.InnerTube,
-                PlaybackResolverKind.NewPipe,
-                PlaybackResolverKind.YtDlp
+                PlaybackResolverKind.NewPipe
             ),
             PlaybackResolverOrder.local
         )
