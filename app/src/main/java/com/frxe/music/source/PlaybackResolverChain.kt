@@ -45,9 +45,10 @@ sealed interface PlaybackResolutionResult {
     ) : PlaybackResolutionResult
 }
 
-internal object PlaybackResolverHedgePolicy {
-    const val ytDlpHeadStartMs = 750L
-}
+internal data class PlaybackResolverHedgePolicy(
+    val ytDlpHeadStartMs: Long = 750L,
+    val localBudgetMs: Long = 8_000L
+)
 
 class PlaybackResolverChain(
     private val resolvers: List<
@@ -55,7 +56,9 @@ class PlaybackResolverChain(
             PlaybackResolverKind,
             suspend () -> ResolvedAudioCandidate?
         >
-    >
+    >,
+    private val hedgePolicy: PlaybackResolverHedgePolicy =
+        PlaybackResolverHedgePolicy()
 ) {
     suspend fun resolve(): PlaybackResolutionResult {
         if (
@@ -88,7 +91,7 @@ class PlaybackResolverChain(
                 try {
                     if (index > 0) {
                         withTimeoutOrNull(
-                            PlaybackResolverHedgePolicy.ytDlpHeadStartMs
+                            hedgePolicy.ytDlpHeadStartMs
                         ) {
                             primaryFinished.await()
                         }
