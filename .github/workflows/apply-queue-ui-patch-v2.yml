@@ -1,0 +1,145 @@
+name: Apply queue UI patch v2
+
+on:
+  push:
+    branches:
+      - fix/island-speed-067
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/island-speed-067
+          fetch-depth: 0
+      - name: Patch Kotlin sources
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          vm_path = Path('app/src/main/java/com/frxe/music/ui/FrxeViewModel.kt')
+          text = vm_path.read_text()
+
+          def replace_once(old, new, label):
+              global text
+              if old not in text:
+                  raise SystemExit(f'missing {label}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              'import com.frxe.music.playback.FrxePlaybackService\n',
+              'import com.frxe.music.playback.FrxePlaybackService\nimport com.frxe.music.playback.PlaybackLaunchPolicy\nimport com.frxe.music.playback.PlaybackQueueStore\n',
+              'playback imports'
+          )
+          replace_once(
+              'import com.frxe.music.source.PlaybackStreamResolver\nimport com.frxe.music.source.YouTubeCatalogSource\n',
+              'import com.frxe.music.source.CatalogLoadPolicy\nimport com.frxe.music.source.YouTubeCatalogSource\n',
+              'source imports'
+          )
+          replace_once(
+              '    private val playbackResolver =\n        PlaybackStreamResolver()\n\n',
+              '',
+              'playbackResolver property'
+          )
+          replace_once(
+              '                    Player.STATE_ENDED &&\n                    autoDjEnabled\n',
+              '                    Player.STATE_ENDED &&\n                    autoDjEnabled &&\n                    !PlaybackQueueStore.hasManualNext()\n',
+              'AutoDJ queue guard'
+          )
+          replace_once(
+              '                    delay(450)\n',
+              '                    delay(CatalogLoadPolicy.homeRemoteDelayMs)\n',
+              'home delay'
+          )
+          replace_once(
+              '                    delay(350)\n',
+              '                    delay(CatalogLoadPolicy.searchDebounceMs)\n',
+              'search delay'
+          )
+
+          play_pattern = re.compile(
+              r'    fun play\(\n        track: Track,\n        queue: List<Track> =\n            emptyList\(\)\n    \) \{.*?\n    \}\n\n    fun togglePlayPause\(\)',
+              re.S
+          )
+          replacement = '''    fun play(\n        track: Track,\n        queue: List<Track> = emptyList()\n    ) {\n        val plan = PlaybackLaunchPolicy.plan(\n            selected = track,\n            requestedQueue = queue\n        )\n\n        plan.tracks.forEach { queuedTrack ->\n            tracksById[queuedTrack.id] = queuedTrack\n        }\n\n        PlaybackQueueStore.replaceAndRequestPlay(\n            tracks = plan.tracks,\n            currentTrackId = plan.currentTrackId\n        )\n\n        loadLyrics(track)\n        refreshNowPlaying()\n    }\n\n    fun togglePlayPause()'''
+          text, count = play_pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('failed to replace play()')
+
+          next_prev_pattern = re.compile(
+              r'    fun next\(\) =\n        controller\n            \?\.seekToNextMediaItem\(\)\n\n    fun previous\(\) =\n        controller\n            \?\.seekToPreviousMediaItem\(\)'
+          )
+          text, count = next_prev_pattern.subn(
+              '    fun next() {\n        queueNext()\n    }\n\n    fun previous() {\n        queuePrevious()\n    }',
+              text,
+              count=1
+          )
+          if count != 1:
+              raise SystemExit('failed to replace next/previous')
+
+          queue_pattern = re.compile(
+              r'                queue =\n                    \(\n                        0 until\n                        player\.mediaItemCount\n                    \).*?\n\n                volume =',
+              re.S
+          )
+          text, count = queue_pattern.subn(
+              '                queue =\n                    PlaybackQueueStore.tracks(),\n\n                volume =',
+              text,
+              count=1
+          )
+          if count != 1:
+              raise SystemExit('failed to replace PlayerUiState queue')
+
+          vm_path.write_text(text)
+
+          app_path = Path('app/src/main/java/com/frxe/music/ui/FrxeApp.kt')
+          app = app_path.read_text()
+          marker = 'import com.frxe.music.model.Track\n'
+          if 'import com.frxe.music.island.IslandPresentationPolicy\n' not in app:
+              if marker not in app:
+                  raise SystemExit('missing FrxeApp import marker')
+              app = app.replace(
+                  marker,
+                  'import com.frxe.music.island.IslandPresentationPolicy\n' + marker,
+                  1
+              )
+          island_if = '        if (\n            !isTv &&\n            !playerOpen &&\n            islandHub.inAppEnabled &&\n            player.track != null\n        ) {'
+          if island_if in app:
+              app = app.replace(
+                  island_if,
+                  '        if (\n            IslandPresentationPolicy.showInApp &&\n            !isTv &&\n            !playerOpen &&\n            islandHub.inAppEnabled &&\n            player.track != null\n        ) {',
+                  1
+              )
+          elif 'IslandPresentationPolicy.showInApp &&' not in app:
+              raise SystemExit('missing in-app Island condition')
+          app_path.write_text(app)
+
+          settings_path = Path('app/src/main/java/com/frxe/music/ui/screens/SettingsScreen.kt')
+          settings = settings_path.read_text()
+          settings = settings.replace(
+              '"Top-center playback controls inside Frxe and, optionally, over other Android apps."',
+              '"Top-center playback controls over other Android apps while FRXE is in the background."',
+              1
+          )
+          settings = settings.replace(
+              '"Top-center mini player while browsing Frxe"',
+              '"Disabled so the Island never covers FRXE itself"',
+              1
+          )
+          settings_path.write_text(settings)
+          PY
+      - name: Remove patch workflows
+        run: |
+          rm -f .github/workflows/apply-queue-ui-patch.yml
+          rm -f .github/workflows/apply-queue-ui-patch-v2.yml
+      - name: Commit patch
+        run: |
+          git config user.name "void"
+          git config user.email "voidnont@proton.me"
+          git add -A
+          git commit -m "fix: unify queue playback and hide in-app Island"
+          git push origin HEAD:fix/island-speed-067
