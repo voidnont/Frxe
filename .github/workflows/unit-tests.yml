@@ -1,4 +1,4 @@
-name: FRXE Unit Tests
+name: FRXE Tests and Debug Build
 
 on:
   pull_request:
@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  unit-tests:
+  test-and-build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -43,5 +43,5 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
-      - name: Run unit tests
-        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
+      - name: Run unit tests and compile debug APK
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug
