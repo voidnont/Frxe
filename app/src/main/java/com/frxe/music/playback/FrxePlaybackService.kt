@@ -1,5 +1,6 @@
 package com.frxe.music.playback
 
+import android.app.PendingIntent
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Handler
@@ -16,6 +17,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.frxe.music.MainActivity
 import com.frxe.music.data.FrxeDatabase
 import com.frxe.music.data.PlaybackHistoryEntity
 import com.frxe.music.downloads.DownloadSupport
@@ -39,6 +41,7 @@ import kotlinx.coroutines.launch
 class FrxePlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private lateinit var player: ExoPlayer
+    private lateinit var systemMediaPlayer: FrxeSystemMediaPlayer
     private lateinit var playbackStore: PlaybackStateStore
     private var islandOverlay: IslandHubOverlayController? = null
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -99,6 +102,10 @@ class FrxePlaybackService : MediaSessionService() {
         ) {
             if (player.mediaItemCount > 0) {
                 playbackStore.save(player)
+            }
+
+            if (::systemMediaPlayer.isInitialized) {
+                systemMediaPlayer.refreshQueueCommands()
             }
 
             islandOverlay?.refresh()
@@ -244,13 +251,43 @@ class FrxePlaybackService : MediaSessionService() {
                 it.addListener(playerListener)
             }
 
-        mediaSession = MediaSession.Builder(this, player)
+        systemMediaPlayer = FrxeSystemMediaPlayer(
+            player = player,
+            queueAvailability = {
+                SystemMediaQueuePolicy.availability(
+                    state = PlaybackQueueStore.state.value,
+                    repeatMode = queueRepeatMode()
+                )
+            },
+            onPrevious = ::handleSystemPrevious,
+            onNext = ::handleSystemNext
+        )
+
+        val sessionActivity = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP
+                )
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                PendingIntent.FLAG_IMMUTABLE
+        )
+
+        mediaSession = MediaSession.Builder(
+            this,
+            systemMediaPlayer
+        )
+            .setSessionActivity(sessionActivity)
             .setCallback(sessionCallback)
             .build()
 
         savedSnapshot?.let(::applyPlaybackPreferences)
         migrateSnapshotIntoQueueIfNeeded(savedSnapshot)
         prepareRestorePosition(savedSnapshot)
+        systemMediaPlayer.refreshQueueCommands()
 
         serviceScope.launch {
             combine(
@@ -260,6 +297,7 @@ class FrxePlaybackService : MediaSessionService() {
                 state to request
             }.collectLatest { (state, request) ->
                 syncQueueState(state, request)
+                systemMediaPlayer.refreshQueueCommands()
             }
         }
 
@@ -504,6 +542,49 @@ class FrxePlaybackService : MediaSessionService() {
         // Leave STATE_ENDED immediately so remote MediaController listeners do not
         // treat a manual queued transition as end-of-queue Auto-DJ.
         player.clearMediaItems()
+    }
+
+    private fun handleSystemPrevious() {
+        val previousEntryId =
+            PlaybackQueueStore.state.value.current?.entryId
+
+        val previousState = PlaybackQueueStore.previous(
+            repeatMode = queueRepeatMode()
+        ) ?: return
+
+        val nextEntryId = previousState.current?.entryId
+            ?: return
+
+        if (nextEntryId == previousEntryId) {
+            player.seekTo(0L)
+            if (player.playWhenReady) {
+                player.play()
+            }
+        }
+
+        systemMediaPlayer.refreshQueueCommands()
+    }
+
+    private fun handleSystemNext() {
+        val previousEntryId =
+            PlaybackQueueStore.state.value.current?.entryId
+
+        val nextState = PlaybackQueueStore.advance(
+            repeatMode = queueRepeatMode(),
+            shuffle = player.shuffleModeEnabled
+        ) ?: return
+
+        val nextEntryId = nextState.current?.entryId
+            ?: return
+
+        if (nextEntryId == previousEntryId) {
+            player.seekTo(0L)
+            if (player.playWhenReady) {
+                player.play()
+            }
+        }
+
+        systemMediaPlayer.refreshQueueCommands()
     }
 
     private fun queueRepeatMode(): QueueRepeatMode =
