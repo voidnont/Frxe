@@ -1,9 +1,9 @@
-name: FRXE Speed Red CI
+name: FRXE Speed CI
 
 on:
   push:
     branches:
-      - perf/frxe-067-speed-red
+      - perf/frxe-067-speed
 
 jobs:
   test:
@@ -18,4 +18,4 @@ jobs:
         with:
           gradle-version: '9.6.0'
       - name: Run speed tests
-        run: gradle --no-daemon :app:testDebugUnitTest --tests '*CatalogSearchCacheTest' --tests '*CatalogHedgeRunnerTest' --tests '*PlaybackPrefetchWindowPolicyTest' --tests '*HomeRefreshPolicyTest'
+        run: gradle --no-daemon :app:testDebugUnitTest --tests '*CatalogSearchCacheTest' --tests '*CatalogHedgeRunnerTest' --tests '*PlaybackPrefetchWindowPolicyTest' --tests '*PlaybackPrefetchCacheMultiTest' --tests '*HomeRefreshPolicyTest'
