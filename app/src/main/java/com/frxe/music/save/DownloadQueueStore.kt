@@ -2,6 +2,7 @@ package com.frxe.music.save
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.frxe.music.source.DownloadedTrackRegistry
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,6 +38,8 @@ object DownloadQueueStore {
 
         synchronized(lock) {
             if (initialized) return
+
+            DownloadedTrackRegistry.initialize(context)
 
             preferences = context.applicationContext.getSharedPreferences(
                 PREFS,
@@ -135,7 +138,10 @@ object DownloadQueueStore {
     }
 
     fun complete(id: String, result: SaveResult) {
+        var sourceUrl: String? = null
+
         updateItem(id) { item ->
+            sourceUrl = item.sourceUrl
             item.copy(
                 state = DownloadQueueItemState.Complete,
                 progress = 1f,
@@ -145,6 +151,11 @@ object DownloadQueueStore {
                 updatedAtMs = System.currentTimeMillis()
             )
         }
+
+        DownloadedTrackRegistry.register(
+            sourceUrl = sourceUrl,
+            localUri = result.uri
+        )
     }
 
     fun fail(id: String, message: String) {
