@@ -3,7 +3,7 @@ name: Build FRXE APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, frxe-0.6.8-island-resolver]
     paths:
       - '.github/workflows/build-apk.yml'
       - 'app/**'
@@ -39,6 +39,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
+
+      - name: Run unit tests
+        run: gradle --no-daemon --stacktrace :app:testReleaseUnitTest
 
       - name: Build installable release APK
         env:
