@@ -10,9 +10,9 @@ import kotlinx.coroutines.withContext
 
 internal object PlaybackResolverOrder {
     val local: List<PlaybackResolverKind> = listOf(
-        PlaybackResolverKind.YtDlp,
         PlaybackResolverKind.InnerTube,
-        PlaybackResolverKind.NewPipe
+        PlaybackResolverKind.NewPipe,
+        PlaybackResolverKind.YtDlp
     )
 }
 
