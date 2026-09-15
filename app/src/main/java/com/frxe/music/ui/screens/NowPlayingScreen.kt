@@ -1,5 +1,6 @@
 package com.frxe.music.ui.screens
 
+import android.content.res.Configuration
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,6 +47,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.frxe.music.lyrics.LyricsRepository
@@ -65,6 +68,9 @@ import com.frxe.music.ui.components.PlayerActionsSheet
 import com.frxe.music.ui.components.QueueSheet
 import com.frxe.music.ui.components.SleepTimerSheet
 import com.frxe.music.ui.components.WavySlider
+import com.frxe.music.ui.gestures.PlayerGestureAction
+import com.frxe.music.ui.gestures.PlayerGesturePreferences
+import com.frxe.music.ui.gestures.playerGestures
 
 private enum class PlayerSheet {
     Actions,
@@ -86,6 +92,14 @@ fun NowPlayingScreen(
     playbackCanRetry: Boolean = false,
     onRetry: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val isTv =
+        configuration.uiMode and Configuration.UI_MODE_TYPE_MASK ==
+            Configuration.UI_MODE_TYPE_TELEVISION
+    val playerGesturesEnabled = remember(context) {
+        PlayerGesturePreferences.enabled(context)
+    }
     val player by viewModel.playerState.collectAsState()
     val likedIds by viewModel.likedIds.collectAsState()
     val library by viewModel.library.collectAsState()
@@ -140,7 +154,31 @@ fun NowPlayingScreen(
         }
 
     BoxWithConstraints(
-        Modifier.fillMaxSize()
+        Modifier
+            .fillMaxSize()
+            .playerGestures(
+                enabled = playerGesturesEnabled,
+                isTv = isTv,
+                blocked = sheet != null
+            ) { action ->
+                when (action) {
+                    PlayerGestureAction.Previous ->
+                        if (trackReady) {
+                            viewModel.queuePrevious()
+                        }
+
+                    PlayerGestureAction.Next ->
+                        if (trackReady) {
+                            viewModel.queueNext()
+                        }
+
+                    PlayerGestureAction.Collapse ->
+                        onClose()
+
+                    PlayerGestureAction.None ->
+                        Unit
+                }
+            }
     ) {
         val artworkBreathingRoom =
             maxHeight * 0.24f
